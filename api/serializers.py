@@ -11,7 +11,10 @@ from .models import (
     Brand,
     Client,
     ClientAttachment,
+    ClientMonthlyAmount,
     ClientOwner,
+    Group,
+    GroupMember,
     NegativeRemark,
     NegativeRemarkOnTask,
     ScopeOfWork,
@@ -80,6 +83,28 @@ class ClientAttachmentSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = ["id", "client_name", "file_url", "created_at", "updated_at"]
+
+
+class ClientMonthlyAmountSerializer(serializers.ModelSerializer):
+    client_name = serializers.CharField(source="client.name", read_only=True)
+
+    class Meta:
+        model = ClientMonthlyAmount
+        fields = [
+            "id",
+            "client",
+            "client_name",
+            "date",
+            "amt",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "client_name", "created_at", "updated_at"]
+
+    def validate_amt(self, value):
+        if value is None:
+            raise serializers.ValidationError("Amount is required.")
+        return value
 
 
 class ScopeOfWorkSerializer(serializers.ModelSerializer):
@@ -159,12 +184,63 @@ class BrandSerializer(serializers.ModelSerializer):
         return cleaned
 
 
+class GroupSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Group
+        fields = ["id", "name", "created_at", "updated_at"]
+        read_only_fields = ["id", "created_at", "updated_at"]
+
+    def validate_name(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("Group name cannot be empty.")
+
+        qs = Group.objects.filter(name__iexact=cleaned)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Group with this name already exists.")
+
+        return cleaned
+
+
+class GroupMemberSerializer(serializers.ModelSerializer):
+    group_name = serializers.CharField(source="group.name", read_only=True)
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+
+    class Meta:
+        model = GroupMember
+        fields = ["id", "group", "group_name", "user", "user_email", "created_at"]
+        read_only_fields = ["id", "group_name", "user_email", "created_at"]
+
+    def validate(self, attrs):
+        group = attrs.get("group") or getattr(self.instance, "group", None)
+        user = attrs.get("user") or getattr(self.instance, "user", None)
+
+        if group and user:
+            qs = GroupMember.objects.filter(group=group, user=user)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError("This user is already a member of the selected group.")
+
+        return attrs
+
+
 class TypeOfWorkSerializer(serializers.ModelSerializer):
     task_count = serializers.SerializerMethodField()
 
     class Meta:
         model = TypeOfWork
-        fields = ["id", "work_type_name", "point", "task_count"]
+        fields = [
+            "id",
+            "work_type_name",
+            "point",
+            "redo_point",
+            "major_changes_point",
+            "minor_changes_point",
+            "task_count",
+        ]
 
     def validate_work_type_name(self, value):
         cleaned = value.strip()
@@ -330,6 +406,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "task_name",
             "instructions",
             "InstructionsByArtDirector",
+            "revision_type",
             "priority",
             "designer",
             "designer_name",
@@ -339,19 +416,28 @@ class TaskSerializer(serializers.ModelSerializer):
             "created_by",
             "created_by_name",
             "target_date",
+            "slides",
             "is_marked_completed_by_superadmin",
             "is_marked_completed_by_account_planner",
             "is_marked_completed_by_art_director",
             "is_marked_completed_by_designer",
+            "have_major_changes",
+            "have_minor_changes",
             "isRevision",
             "isRedo",
             "excellence",
+            "excellence_reason",
             "revisions_count",
             "redos_count",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["revision_no", "redo_no", "revision_count", "redo_count", "created_by", "created_at", "updated_at"]
+
+    def validate_slides(self, value):
+        if value < 1:
+            raise serializers.ValidationError("Slides must be at least 1.")
+        return value
 
     def validate(self, attrs):
         """
@@ -368,14 +454,33 @@ class TaskSerializer(serializers.ModelSerializer):
         scope_of_work = attrs.get("scope_of_work", getattr(self.instance, "scope_of_work", None))
         client = attrs.get("client", getattr(self.instance, "client", None))
         effective_task_name = attrs.get("task_name", getattr(self.instance, "task_name", ""))
-
         if scope_of_work and client and scope_of_work.client_id != client.id:
             raise serializers.ValidationError(
                 {"scope_of_work": "Selected scope of work must belong to the same client as the task."}
             )
 
+        if not revision_of and not redo_of and not scope_of_work:
+            raise serializers.ValidationError({"scope_of_work": "Scope of work is required."})
+
         if not revision_of and not redo_of and not str(effective_task_name or "").strip():
             raise serializers.ValidationError({"task_name": "Task name is required."})
+
+        effective_have_major_changes = attrs.get(
+            "have_major_changes",
+            getattr(self.instance, "have_major_changes", False),
+        )
+        effective_have_minor_changes = attrs.get(
+            "have_minor_changes",
+            getattr(self.instance, "have_minor_changes", False),
+        )
+
+        if revision_of and not effective_have_major_changes and not effective_have_minor_changes:
+            raise serializers.ValidationError(
+                {
+                    "have_major_changes": "Revision changes are required for revision tasks.",
+                    "have_minor_changes": "Revision changes are required for revision tasks.",
+                }
+            )
 
         if self.instance is not None and user and user.is_authenticated and user.role == User.Role.ACCOUNT_PLANNER:
             forbidden_fields = {

@@ -9,7 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
-from .models import Brand, Client, ClientAttachment, ClientOwner, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TypeOfWork
+from .models import Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TypeOfWork
 from .permissions import (
     CanWriteTaskByRole,
     IsClientOwnerOrReadOnly,
@@ -26,8 +26,11 @@ from .serializers import (
     ChangePasswordSerializer,
     ClientSerializer,
     ClientAttachmentSerializer,
+    ClientMonthlyAmountSerializer,
     ClientOwnerSerializer,
     EmailAuthTokenSerializer,
+    GroupMemberSerializer,
+    GroupSerializer,
     NegativeRemarkSerializer,
     NegativeRemarkOnTaskSerializer,
     PasswordResetConfirmSerializer,
@@ -48,6 +51,25 @@ class BrandViewSet(viewsets.ModelViewSet):
     search_fields = ["name"]
     ordering_fields = ["id", "name"]
     ordering = ["name"]
+
+
+class GroupViewSet(viewsets.ModelViewSet):
+    queryset = Group.objects.all()
+    serializer_class = GroupSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    search_fields = ["name"]
+    ordering_fields = ["id", "name", "created_at", "updated_at"]
+    ordering = ["name"]
+
+
+class GroupMemberViewSet(viewsets.ModelViewSet):
+    queryset = GroupMember.objects.all().select_related("group", "user")
+    serializer_class = GroupMemberSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ["group", "user"]
+    search_fields = ["group__name", "user__email", "user__first_name", "user__last_name"]
+    ordering_fields = ["id", "group__name", "user__email", "created_at"]
+    ordering = ["group__name", "user__email"]
 
 
 class ServiceCategoryViewSet(viewsets.ModelViewSet):
@@ -141,6 +163,28 @@ class ClientAttachmentViewSet(viewsets.ModelViewSet):
     search_fields = ["client__name", "file"]
     ordering_fields = ["id", "client", "created_at", "updated_at"]
     ordering = ["-created_at", "-id"]
+
+
+class ClientMonthlyAmountViewSet(viewsets.ModelViewSet):
+    queryset = ClientMonthlyAmount.objects.all().select_related("client")
+    serializer_class = ClientMonthlyAmountSerializer
+    permission_classes = [permissions.IsAuthenticated, IsClientOwnerOrReadOnly]
+    filterset_fields = ["client", "date"]
+    search_fields = ["client__name"]
+    ordering_fields = ["id", "client", "date", "amt", "created_at", "updated_at"]
+    ordering = ["-date", "-id"]
+
+    def perform_create(self, serializer):
+        client = serializer.validated_data["client"]
+        if not user_can_manage_client(self.request.user, client):
+            raise PermissionDenied("You do not have permission to modify this client's monthly amount.")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        client = serializer.validated_data.get("client", serializer.instance.client)
+        if not user_can_manage_client(self.request.user, client):
+            raise PermissionDenied("You do not have permission to modify this client's monthly amount.")
+        serializer.save()
 
 
 class ClientOwnerViewSet(viewsets.ModelViewSet):

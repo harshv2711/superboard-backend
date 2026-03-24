@@ -6,6 +6,7 @@ User = get_user_model()
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=False, min_length=8)
+    salary = serializers.DecimalField(source="employee_profile.salary", max_digits=12, decimal_places=2, read_only=True)
 
     class Meta:
         model = User
@@ -15,6 +16,7 @@ class UserSerializer(serializers.ModelSerializer):
             "role",
             "first_name",
             "last_name",
+            "salary",
             "password",
             "is_staff",
             "is_active",

@@ -5,7 +5,10 @@ from .views import (
     ChangePasswordView,
     ClientViewSet,
     ClientAttachmentViewSet,
+    ClientMonthlyAmountViewSet,
     ClientOwnerViewSet,
+    GroupMemberViewSet,
+    GroupViewSet,
     LoginView,
     LogoutView,
     MeView,
@@ -23,12 +26,15 @@ from .views import (
 
 router = DefaultRouter()
 router.register(r"brands", BrandViewSet, basename="brand")
+router.register(r"groups", GroupViewSet, basename="group")
+router.register(r"group-members", GroupMemberViewSet, basename="group-member")
 router.register(r"service-categories", ServiceCategoryViewSet, basename="service-category")
 router.register(r"type-of-work", TypeOfWorkViewSet, basename="type-of-work")
 router.register(r"negative-remarks", NegativeRemarkViewSet, basename="negative-remark")
 router.register(r"negative-remarks-on-task", NegativeRemarkOnTaskViewSet, basename="negative-remark-on-task")
 router.register(r"task-attachments", TaskAttachmentViewSet, basename="task-attachment")
 router.register(r"client-attachments", ClientAttachmentViewSet, basename="client-attachment")
+router.register(r"client-monthly-amounts", ClientMonthlyAmountViewSet, basename="client-monthly-amount")
 router.register(r"clients", ClientViewSet, basename="client")
 router.register(r"client-owners", ClientOwnerViewSet, basename="client-owner")
 router.register(r"scope-of-work", ScopeOfWorkViewSet, basename="scope-of-work")

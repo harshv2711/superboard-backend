@@ -30,6 +30,9 @@ class ServiceCategory(models.Model):
 class TypeOfWork(models.Model):
     work_type_name = models.CharField(max_length=255, unique=True)
     point = models.FloatField(default=0.0)
+    redo_point = models.FloatField(default=1.0)
+    major_changes_point = models.FloatField(default=0.5)
+    minor_changes_point = models.FloatField(default=0.25)
 
     class Meta:
         ordering = ["work_type_name"]
@@ -85,6 +88,70 @@ class ClientOwner(models.Model):
 
     def __str__(self):
         return f"{self.user.email} -> {self.client.name}"
+
+
+class ClientMonthlyAmount(models.Model):
+    client = models.ForeignKey(
+        Client,
+        on_delete=models.CASCADE,
+        related_name="monthly_amounts",
+    )
+    date = models.DateField()
+    amt = models.DecimalField(max_digits=12, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["client"]),
+            models.Index(fields=["date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.client.name} | {self.date} | {self.amt}"
+
+
+class Group(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["name"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class GroupMember(models.Model):
+    group = models.ForeignKey(
+        Group,
+        on_delete=models.CASCADE,
+        related_name="memberships",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="group_memberships",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["group__name", "user__email"]
+        constraints = [
+            models.UniqueConstraint(fields=["group", "user"], name="uniq_group_member_group_user")
+        ]
+        indexes = [
+            models.Index(fields=["group"]),
+            models.Index(fields=["user"]),
+        ]
+
+    def __str__(self):
+        return f"{self.group.name} -> {self.user.email}"
 
 
 class ClientAttachment(models.Model):
@@ -231,6 +298,11 @@ class Task(models.Model):
         MEDIUM = "medium", "Medium"
         LOW = "low", "Low"
 
+    class RevisionType(models.TextChoices):
+        SMALL = "small", "Small"
+        MEDIUM = "medium", "Medium"
+        LARGE = "large", "Large"
+
     client = models.ForeignKey(
         Client,
         on_delete=models.PROTECT,
@@ -269,6 +341,12 @@ class Task(models.Model):
     task_name = models.CharField(max_length=255, blank=True)
     instructions = models.TextField(blank=True)
     InstructionsByArtDirector = models.TextField(blank=True, null=True)
+    revision_type = models.CharField(
+        max_length=10,
+        choices=RevisionType.choices,
+        blank=True,
+        default="",
+    )
     priority = models.CharField(
         max_length=10,
         choices=Priority.choices,
@@ -299,10 +377,13 @@ class Task(models.Model):
     )
 
     target_date = models.DateField(null=True, blank=True)
+    slides = models.PositiveIntegerField(default=1)
     is_marked_completed_by_superadmin = models.BooleanField(default=False)
     is_marked_completed_by_account_planner = models.BooleanField(default=False)
     is_marked_completed_by_art_director = models.BooleanField(default=False)
     is_marked_completed_by_designer = models.BooleanField(default=False)
+    have_major_changes = models.BooleanField(default=False)
+    have_minor_changes = models.BooleanField(default=False)
 
     # Originals: total revisions under them
     # Revisions: their own revision number (1/2/3...)
@@ -310,6 +391,7 @@ class Task(models.Model):
     redo_count = models.PositiveIntegerField(default=0)
 
     excellence = models.DecimalField(max_digits=12, decimal_places=4, null=True, blank=True)
+    excellence_reason = models.TextField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -330,6 +412,7 @@ class Task(models.Model):
         ]
 
     def clean(self):
+        super().clean()
         if self.pk and self.revision_of_id == self.pk:
             raise ValidationError({"revision_of": "A task cannot be a revision of itself."})
         if self.pk and self.redo_of_id == self.pk:
@@ -360,6 +443,18 @@ class Task(models.Model):
                 raise ValidationError(
                     {"scope_of_work": "Selected scope of work must belong to the same client as the task."}
                 )
+
+        if self.have_major_changes and self.have_minor_changes:
+            raise ValidationError(
+                {
+                    "have_major_changes": "Major changes and minor changes cannot both be selected.",
+                    "have_minor_changes": "Major changes and minor changes cannot both be selected.",
+                }
+            )
+
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        return super().save(*args, **kwargs)
 
     def _sync_original_child_count(self, original_id: int, relation_field: str, count_field: str):
         count = Task.objects.filter(**{f"{relation_field}_id": original_id}).count()

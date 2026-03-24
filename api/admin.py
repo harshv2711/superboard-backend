@@ -1,12 +1,29 @@
+from django import forms
 from django.contrib import admin
 from django.contrib.auth import get_user_model
 from import_export import fields, resources
 from import_export.admin import ImportExportModelAdmin
 from import_export.widgets import DateWidget, ForeignKeyWidget
 
-from .models import Brand, Client, ClientAttachment, ClientOwner, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TypeOfWork
+from .models import Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TypeOfWork
 
 User = get_user_model()
+
+
+class TaskAdminForm(forms.ModelForm):
+    class Meta:
+        model = Task
+        fields = "__all__"
+
+    def clean(self):
+        cleaned_data = super().clean()
+        have_major_changes = cleaned_data.get("have_major_changes")
+        have_minor_changes = cleaned_data.get("have_minor_changes")
+
+        if have_major_changes and have_minor_changes:
+            raise forms.ValidationError("Major changes and minor changes cannot both be selected at the same time.")
+
+        return cleaned_data
 
 
 class BrandResource(resources.ModelResource):
@@ -67,16 +84,20 @@ class TaskResource(resources.ModelResource):
             "task_name",
             "instructions",
             "InstructionsByArtDirector",
+            "revision_type",
             "priority",
             "designer",
             "created_by",
             "type_of_work",
             "scope_of_work",
             "target_date",
+            "slides",
             "is_marked_completed_by_superadmin",
             "is_marked_completed_by_account_planner",
             "is_marked_completed_by_art_director",
             "is_marked_completed_by_designer",
+            "have_major_changes",
+            "have_minor_changes",
             "revision_of",
             "redo_of",
             "revision_no",
@@ -84,6 +105,7 @@ class TaskResource(resources.ModelResource):
             "revision_count",
             "redo_count",
             "excellence",
+            "excellence_reason",
             "created_at",
             "updated_at",
         )
@@ -102,9 +124,25 @@ class BrandAdmin(ImportExportModelAdmin):
     ordering = ("name",)
 
 
+@admin.register(Group)
+class GroupAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "created_at")
+    search_fields = ("name",)
+    ordering = ("name",)
+
+
+@admin.register(GroupMember)
+class GroupMemberAdmin(admin.ModelAdmin):
+    list_display = ("id", "group", "user", "created_at")
+    search_fields = ("group__name", "user__email", "user__first_name", "user__last_name")
+    list_filter = ("group", "user")
+    ordering = ("group__name", "user__email")
+    autocomplete_fields = ("group", "user")
+
+
 @admin.register(TypeOfWork)
 class TypeOfWorkAdmin(admin.ModelAdmin):
-    list_display = ("id", "work_type_name", "point")
+    list_display = ("id", "work_type_name", "point", "redo_point", "major_changes_point", "minor_changes_point")
     search_fields = ("work_type_name",)
     ordering = ("work_type_name",)
 
@@ -165,6 +203,15 @@ class ClientAttachmentAdmin(admin.ModelAdmin):
     autocomplete_fields = ("client",)
 
 
+@admin.register(ClientMonthlyAmount)
+class ClientMonthlyAmountAdmin(admin.ModelAdmin):
+    list_display = ("id", "client", "date", "amt", "created_at")
+    search_fields = ("client__name",)
+    list_filter = ("client", "date")
+    ordering = ("-date", "-id")
+    autocomplete_fields = ("client",)
+
+
 @admin.register(ClientOwner)
 class ClientOwnerAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "client", "created_at")
@@ -196,6 +243,7 @@ class ScopeOfWorkAdmin(admin.ModelAdmin):
 
 @admin.register(Task)
 class TaskAdmin(ImportExportModelAdmin):
+    form = TaskAdminForm
     resource_class = TaskResource
 
     list_display = (
@@ -204,16 +252,19 @@ class TaskAdmin(ImportExportModelAdmin):
         "scope_of_work",
         "task_name",
         "task_kind",
+        "revision_type",
         "priority",
         "designer",
         "created_by",
         "type_of_work",
         "target_date",
+        "slides",
         "excellence",
+        "excellence_reason",
         "revision_of",
         "redo_of",
     )
-    list_filter = ("client", "scope_of_work", "priority", "designer", "created_by", "target_date")
+    list_filter = ("client", "scope_of_work", "priority", "revision_type", "designer", "created_by", "target_date")
     search_fields = ("id", "task_name", "instructions", "client__name", "scope_of_work__deliverable_name", "designer__email", "created_by__email")
     ordering = ("-target_date", "-created_at")
     autocomplete_fields = ("client", "scope_of_work", "designer", "created_by", "type_of_work", "revision_of", "redo_of")
@@ -222,8 +273,8 @@ class TaskAdmin(ImportExportModelAdmin):
 
     fieldsets = (
         ("Core", {"fields": ("id", "client", "scope_of_work", "priority", "designer", "created_by", "type_of_work")}),
-        ("Task Details", {"fields": ("task_name", "instructions", "InstructionsByArtDirector")}),
-        ("Timeline", {"fields": ("target_date",)}),
+        ("Task Details", {"fields": ("task_name", "instructions", "InstructionsByArtDirector", "revision_type")}),
+        ("Timeline", {"fields": ("target_date", "slides")}),
         ("Revision", {"fields": ("revision_of", "revision_no", "revision_count")}),
         ("Redo", {"fields": ("redo_of", "redo_no", "redo_count")}),
         (
@@ -234,10 +285,12 @@ class TaskAdmin(ImportExportModelAdmin):
                     "is_marked_completed_by_account_planner",
                     "is_marked_completed_by_art_director",
                     "is_marked_completed_by_designer",
+                    "have_major_changes",
+                    "have_minor_changes",
                 )
             },
         ),
-        ("Scoring", {"fields": ("excellence",)}),
+        ("Scoring", {"fields": ("excellence", "excellence_reason")}),
         ("System", {"fields": ("created_at", "updated_at")}),
     )
 

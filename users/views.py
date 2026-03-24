@@ -25,7 +25,7 @@ class IsSelfOrStaff(permissions.BasePermission):
 
 
 class UserViewSet(viewsets.ModelViewSet):
-    queryset = User.objects.all().order_by("-date_joined")
+    queryset = User.objects.all().select_related("employee_profile").order_by("-date_joined")
     serializer_class = UserSerializer
     permission_classes = [IsAuthenticatedOrCreate, IsSelfOrStaff]
     search_fields = ["email", "role", "first_name", "last_name"]
