@@ -1,7 +1,8 @@
 from django.contrib.auth import get_user_model
 from rest_framework import permissions, viewsets
 
-from .serializers import UserSerializer
+from .models import Employee
+from .serializers import EmployeeSerializer, UserSerializer
 
 User = get_user_model()
 
@@ -31,3 +32,21 @@ class UserViewSet(viewsets.ModelViewSet):
     search_fields = ["email", "role", "first_name", "last_name"]
     ordering_fields = ["id", "email", "role", "date_joined"]
     ordering = ["-date_joined"]
+
+
+class IsSuperuserRole(permissions.BasePermission):
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and getattr(request.user, "role", "") == User.Role.SUPERUSER
+        )
+
+
+class EmployeeViewSet(viewsets.ModelViewSet):
+    queryset = Employee.objects.select_related("user").order_by("user__email")
+    serializer_class = EmployeeSerializer
+    permission_classes = [IsSuperuserRole]
+    search_fields = ["user__email", "user__first_name", "user__last_name", "designation"]
+    ordering_fields = ["id", "user__email", "designation", "salary", "created_at"]
+    ordering = ["user__email"]

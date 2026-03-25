@@ -1,14 +1,16 @@
 import shutil
 import tempfile
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
-from django.test import override_settings
 from rest_framework import status
 from rest_framework.test import APITestCase
 
 from .models import Brand, Client, ClientOwner, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TypeOfWork
+from .utils.task_points import calculate_designer_points, calculate_task_points
 
 User = get_user_model()
 TEST_MEDIA_ROOT = tempfile.mkdtemp()
@@ -1267,3 +1269,199 @@ class TaskAPITests(APITestCase):
             response.data["detail"],
             "Cannot delete the task because Original Task is associated with another task (revision).",
         )
+
+
+class TaskPointsUtilsTests(TestCase):
+    def setUp(self):
+        self.designer = User.objects.create_user(email="designer@test.com", password="password123")
+        self.other_designer = User.objects.create_user(email="other@test.com", password="password123")
+        self.client_obj = Client.objects.create(name="Pivot", client_interface="Harsh")
+
+    def test_calculate_task_points_matches_carousel_example(self):
+        carousel = TypeOfWork.objects.create(
+            work_type_name="Carousel Post",
+            point=0.5,
+            redo_point=1.0,
+            major_changes_point=0.0,
+            minor_changes_point=0.25,
+        )
+        original = Task.objects.create(
+            client=self.client_obj,
+            task_name="Carousel",
+            designer=self.designer,
+            type_of_work=carousel,
+            slides=3,
+        )
+        Task.objects.create(
+            revision_of=original,
+            task_name="Carousel",
+            designer=self.designer,
+            type_of_work=carousel,
+            slides=5,
+            have_minor_changes=True,
+        )
+        redo = Task.objects.create(
+            redo_of=original,
+            task_name="Carousel",
+            designer=self.designer,
+            type_of_work=carousel,
+            slides=2,
+        )
+        Task.objects.create(
+            revision_of=redo,
+            task_name="Carousel",
+            designer=self.designer,
+            type_of_work=carousel,
+            slides=4,
+            have_major_changes=True,
+        )
+
+        self.assertEqual(calculate_task_points(original), 6.75)
+
+    def test_calculate_task_points_includes_negative_remarks_and_excellence(self):
+        homepage = TypeOfWork.objects.create(
+            work_type_name="Home Page & Product Page",
+            point=4.0,
+            redo_point=2.0,
+            major_changes_point=1.0,
+            minor_changes_point=0.0,
+        )
+        original = Task.objects.create(
+            client=self.client_obj,
+            task_name="Homepage",
+            designer=self.designer,
+            type_of_work=homepage,
+            slides=1,
+            excellence=Decimal("5.0"),
+        )
+        Task.objects.create(
+            revision_of=original,
+            task_name="Homepage",
+            designer=self.designer,
+            type_of_work=homepage,
+            have_major_changes=True,
+        )
+        negative_remark = NegativeRemark.objects.create(
+            remark_name="Missed detail",
+            point=Decimal("-0.5"),
+        )
+        NegativeRemarkOnTask.objects.create(task=original, negative_remark=negative_remark)
+
+        self.assertEqual(calculate_task_points(original), 9.5)
+
+    def test_calculate_task_points_returns_zero_without_type_of_work(self):
+        original = Task.objects.create(
+            client=self.client_obj,
+            task_name="Untyped Task",
+            designer=self.designer,
+        )
+
+        self.assertEqual(calculate_task_points(original), 0.0)
+
+    def test_calculate_task_points_rejects_revision_and_redo_tasks(self):
+        static_post = TypeOfWork.objects.create(
+            work_type_name="Static Post",
+            point=1.0,
+            redo_point=1.0,
+            major_changes_point=0.5,
+            minor_changes_point=0.25,
+        )
+        original = Task.objects.create(
+            client=self.client_obj,
+            task_name="Static Post",
+            designer=self.designer,
+            type_of_work=static_post,
+        )
+        revision = Task.objects.create(
+            revision_of=original,
+            task_name="Static Post",
+            designer=self.designer,
+            type_of_work=static_post,
+            have_major_changes=True,
+        )
+        redo = Task.objects.create(
+            redo_of=original,
+            task_name="Static Post",
+            designer=self.designer,
+            type_of_work=static_post,
+        )
+
+        with self.assertRaises(ValueError):
+            calculate_task_points(revision)
+
+        with self.assertRaises(ValueError):
+            calculate_task_points(redo)
+
+    def test_calculate_designer_points_sums_only_original_tasks_for_designer(self):
+        carousel = TypeOfWork.objects.create(
+            work_type_name="Designer Carousel",
+            point=0.5,
+            redo_point=1.0,
+            major_changes_point=0.0,
+            minor_changes_point=0.25,
+        )
+        static_post = TypeOfWork.objects.create(
+            work_type_name="Designer Static Post",
+            point=1.0,
+            redo_point=1.0,
+            major_changes_point=0.5,
+            minor_changes_point=0.25,
+        )
+
+        original_one = Task.objects.create(
+            client=self.client_obj,
+            task_name="Carousel",
+            designer=self.designer,
+            type_of_work=carousel,
+            slides=3,
+        )
+        Task.objects.create(
+            revision_of=original_one,
+            task_name="Carousel",
+            designer=self.designer,
+            type_of_work=carousel,
+            slides=5,
+            have_minor_changes=True,
+        )
+        redo = Task.objects.create(
+            redo_of=original_one,
+            task_name="Carousel",
+            designer=self.designer,
+            type_of_work=carousel,
+            slides=2,
+        )
+        Task.objects.create(
+            revision_of=redo,
+            task_name="Carousel",
+            designer=self.designer,
+            type_of_work=carousel,
+            slides=4,
+            have_major_changes=True,
+        )
+
+        Task.objects.create(
+            client=self.client_obj,
+            task_name="Static",
+            designer=self.designer,
+            type_of_work=static_post,
+        )
+        Task.objects.create(
+            revision_of=original_one,
+            task_name="Carousel",
+            designer=self.designer,
+            type_of_work=carousel,
+            have_major_changes=True,
+        )
+        Task.objects.create(
+            client=self.client_obj,
+            task_name="No Type",
+            designer=self.designer,
+        )
+        Task.objects.create(
+            client=self.client_obj,
+            task_name="Other Designer Task",
+            designer=self.other_designer,
+            type_of_work=static_post,
+        )
+
+        self.assertEqual(calculate_designer_points(self.designer), 7.75)
