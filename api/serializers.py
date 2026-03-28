@@ -433,6 +433,7 @@ class DesignerKpiSummarySerializer(serializers.Serializer):
     designer_id = serializers.IntegerField()
     month = serializers.CharField()
     total_kpi_score = serializers.FloatField()
+    weekly_scores = serializers.DictField(child=serializers.FloatField())
 
 
 class ClientOwnerSerializer(serializers.ModelSerializer):

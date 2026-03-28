@@ -392,10 +392,12 @@ class TaskViewSet(viewsets.ModelViewSet):
         else:
             raise ValidationError({"designer_id": "Designer id is required."})
 
+        kpi_summary = calculate_designer_monthly_kpi(designer_id=designer_id, year=year, month=month)
         payload = {
             "designer_id": designer_id,
             "month": f"{year:04d}-{month:02d}",
-            "total_kpi_score": calculate_designer_monthly_kpi(designer_id=designer_id, year=year, month=month),
+            "total_kpi_score": kpi_summary["total_kpi_score"],
+            "weekly_scores": kpi_summary["weekly_scores"],
         }
         serializer = DesignerKpiSummarySerializer(payload)
         return Response(serializer.data)

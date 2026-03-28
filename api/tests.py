@@ -1040,6 +1040,11 @@ class TaskAPITests(APITestCase):
         self.assertEqual(response.data["designer_id"], self.designer.id)
         self.assertEqual(response.data["month"], "2026-03")
         self.assertAlmostEqual(response.data["total_kpi_score"], 20.75)
+        self.assertEqual(response.data["weekly_scores"]["1"], 0.0)
+        self.assertEqual(response.data["weekly_scores"]["2"], 0.0)
+        self.assertAlmostEqual(response.data["weekly_scores"]["3"], 20.75)
+        self.assertEqual(response.data["weekly_scores"]["4"], 0.0)
+        self.assertEqual(response.data["weekly_scores"]["5"], 0.0)
 
     def test_designer_kpi_endpoint_allows_designer_to_query_self_without_designer_id(self):
         self.client.force_authenticate(self.designer)
@@ -1063,6 +1068,7 @@ class TaskAPITests(APITestCase):
         self.assertEqual(response.data["designer_id"], self.designer.id)
         self.assertEqual(response.data["month"], "2026-03")
         self.assertAlmostEqual(response.data["total_kpi_score"], 15.0)
+        self.assertAlmostEqual(response.data["weekly_scores"]["2"], 15.0)
 
     def test_task_excellence_accepts_integers_and_floats_including_negative_values(self):
         cases = [

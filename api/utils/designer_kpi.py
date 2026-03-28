@@ -49,10 +49,20 @@ def calculate_designer_monthly_kpi(designer_id, year, month) -> float:
         group["tasks"][task.id] = task
 
     total = Decimal("0")
+    weekly_scores = {str(week): Decimal("0") for week in range(1, 6)}
     for group in grouped_tasks.values():
-        total += _calculate_group_points(group["original_task"], group["tasks"].values())
+        related_tasks = list(group["tasks"].values())
+        group_points = _calculate_group_points(group["original_task"], related_tasks)
+        total += group_points
+        weekly_scores[str(_resolve_group_week(group["original_task"], related_tasks))] += group_points
 
-    return float(total)
+    return {
+        "total_kpi_score": float(total),
+        "weekly_scores": {
+            week: float(value)
+            for week, value in weekly_scores.items()
+        },
+    }
 
 
 def _resolve_original_task(task):
@@ -84,6 +94,18 @@ def _calculate_group_points(original_task, related_tasks) -> Decimal:
         negative_points += _calculate_negative_points(task)
 
     return slide_points + revision_points + redo_points + excellence_points - negative_points
+
+
+def _resolve_group_week(original_task, related_tasks) -> int:
+    dated_tasks = [task for task in related_tasks if task.target_date]
+    if original_task in dated_tasks:
+        reference_date = original_task.target_date
+    elif dated_tasks:
+        reference_date = min(task.target_date for task in dated_tasks)
+    else:
+        return 1
+
+    return min(5, ((reference_date.day - 1) // 7) + 1)
 
 
 def _calculate_revision_points(task) -> Decimal:
