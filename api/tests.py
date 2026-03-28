@@ -805,9 +805,13 @@ class TaskAPITests(APITestCase):
             description="Website work",
         )
         self.type_of_work = TypeOfWork.objects.create(
-            service_category=self.service_category,
             work_type_name="Website Design",
             point=5,
+        )
+        self.scope_of_work = ScopeOfWork.objects.create(
+            client=self.client_obj,
+            service_category=self.service_category,
+            deliverable_name="Landing Page",
         )
         self.list_url = reverse("task-list")
 
@@ -816,10 +820,16 @@ class TaskAPITests(APITestCase):
             "client": self.client_obj.id,
             "task_name": "Spring Campaign",
             "instructions": "Create launch assets",
+            "scope_of_work": self.scope_of_work.id,
             "priority": Task.Priority.HIGH,
+            "stage": Task.Stage.ON_GOING,
             "designer": self.designer.id,
             "type_of_work": self.type_of_work.id,
             "target_date": "2026-03-12",
+            "impressions": 45000,
+            "ctr": "3.25",
+            "engagement_rate": "5.75",
+            "promotion_type": Task.PromotionType.SPONSORED,
             "is_marked_completed_by_superadmin": True,
             "is_marked_completed_by_account_planner": True,
             "is_marked_completed_by_art_director": False,
@@ -832,16 +842,227 @@ class TaskAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["target_date"], "2026-03-12")
         self.assertEqual(response.data["priority"], Task.Priority.HIGH)
+        self.assertEqual(response.data["stage"], Task.Stage.APPROVED)
+        self.assertEqual(response.data["impressions"], 45000)
+        self.assertEqual(response.data["ctr"], "3.25")
+        self.assertEqual(response.data["engagement_rate"], "5.75")
+        self.assertEqual(response.data["promotion_type"], Task.PromotionType.SPONSORED)
         self.assertEqual(response.data["type_of_work"], self.type_of_work.id)
         self.assertEqual(response.data["type_of_work_name"], "Website Design")
         self.assertEqual(response.data["service_category_name"], "Website Development")
         self.assertTrue(response.data["is_marked_completed_by_superadmin"])
         self.assertTrue(response.data["is_marked_completed_by_account_planner"])
-        self.assertFalse(response.data["is_marked_completed_by_art_director"])
+        self.assertTrue(response.data["is_marked_completed_by_art_director"])
         self.assertTrue(response.data["is_marked_completed_by_designer"])
         self.assertFalse(response.data["isRevision"])
         self.assertEqual(response.data["excellence"], "-3.2500")
         self.assertEqual(Task.objects.get(pk=response.data["id"]).target_date.isoformat(), "2026-03-12")
+        self.assertEqual(Task.objects.get(pk=response.data["id"]).promotion_type, Task.PromotionType.SPONSORED)
+
+    def test_task_defaults_stage_to_backlog(self):
+        response = self.client.post(
+            self.list_url,
+                {
+                    "client": self.client_obj.id,
+                    "task_name": "Default Stage Task",
+                    "scope_of_work": self.scope_of_work.id,
+                    "priority": Task.Priority.MEDIUM,
+                },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["stage"], Task.Stage.BACKLOG)
+        self.assertEqual(response.data["promotion_type"], Task.PromotionType.ORGANIC)
+
+    def test_can_patch_task_stage_only(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Kanban Task",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.BACKLOG,
+        )
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.APPROVED,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["stage"], Task.Stage.APPROVED)
+        self.assertTrue(response.data["is_marked_completed_by_account_planner"])
+        self.assertTrue(response.data["is_marked_completed_by_art_director"])
+        self.assertTrue(response.data["is_marked_completed_by_designer"])
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.APPROVED)
+        derived_state = Task.completion_state_for_stage(task.stage)
+        self.assertTrue(derived_state["is_marked_completed_by_account_planner"])
+        self.assertTrue(derived_state["is_marked_completed_by_art_director"])
+        self.assertTrue(derived_state["is_marked_completed_by_designer"])
+
+    def test_designer_completion_flag_updates_stage(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Designer Complete Task",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.ON_GOING,
+        )
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "is_marked_completed_by_designer": True,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["stage"], Task.Stage.COMPLETE)
+        self.assertTrue(response.data["is_marked_completed_by_designer"])
+        self.assertFalse(response.data["is_marked_completed_by_art_director"])
+        self.assertFalse(response.data["is_marked_completed_by_account_planner"])
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.COMPLETE)
+        derived_state = Task.completion_state_for_stage(task.stage)
+        self.assertTrue(derived_state["is_marked_completed_by_designer"])
+        self.assertFalse(derived_state["is_marked_completed_by_art_director"])
+        self.assertFalse(derived_state["is_marked_completed_by_account_planner"])
+
+    def test_complete_stage_resets_higher_completion_flags(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Rollback Completion Task",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.APPROVED,
+        )
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.COMPLETE,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["stage"], Task.Stage.COMPLETE)
+        self.assertTrue(response.data["is_marked_completed_by_designer"])
+        self.assertFalse(response.data["is_marked_completed_by_art_director"])
+        self.assertFalse(response.data["is_marked_completed_by_account_planner"])
+
+    def test_designer_kpi_endpoint_returns_monthly_total_for_designer(self):
+        self.type_of_work.point = 2
+        self.type_of_work.redo_point = 3
+        self.type_of_work.major_changes_point = 1.5
+        self.type_of_work.minor_changes_point = 0.5
+        self.type_of_work.save()
+
+        original = Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Original Task",
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2026-03-15",
+            slides=4,
+            stage=Task.Stage.COMPLETE,
+            excellence=Decimal("1.00"),
+        )
+        revision = Task.objects.create(
+            revision_of=original,
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2026-03-18",
+            slides=6,
+            stage=Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+            have_major_changes=True,
+            excellence=Decimal("0.25"),
+        )
+        redo = Task.objects.create(
+            redo_of=original,
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2026-03-22",
+            slides=5,
+            stage=Task.Stage.APPROVED,
+            excellence=Decimal("0.75"),
+        )
+        Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Second Task",
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2026-03-20",
+            slides=2,
+            stage=Task.Stage.COMPLETE,
+        )
+        Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="April Task",
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2026-04-02",
+            slides=9,
+            stage=Task.Stage.APPROVED,
+        )
+        Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Backlog Task",
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2026-03-24",
+            slides=7,
+            stage=Task.Stage.BACKLOG,
+        )
+
+        low_quality = NegativeRemark.objects.create(remark_name="Low quality", point=Decimal("0.50"))
+        missed_brief = NegativeRemark.objects.create(remark_name="Missed brief", point=Decimal("1.00"))
+        typo = NegativeRemark.objects.create(remark_name="Typo", point=Decimal("0.25"))
+        NegativeRemarkOnTask.objects.create(task=original, negative_remark=low_quality)
+        NegativeRemarkOnTask.objects.create(task=revision, negative_remark=missed_brief)
+        NegativeRemarkOnTask.objects.create(task=redo, negative_remark=typo)
+
+        response = self.client.get(
+            reverse("task-designer-kpi"),
+            {"designer_id": self.designer.id, "month": "2026-03"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["designer_id"], self.designer.id)
+        self.assertEqual(response.data["month"], "2026-03")
+        self.assertAlmostEqual(response.data["total_kpi_score"], 20.75)
+
+    def test_designer_kpi_endpoint_allows_designer_to_query_self_without_designer_id(self):
+        self.client.force_authenticate(self.designer)
+        Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Self KPI Task",
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2026-03-10",
+            slides=3,
+            stage=Task.Stage.COMPLETE,
+        )
+
+        response = self.client.get(
+            reverse("task-designer-kpi"),
+            {"month": "2026-03"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["designer_id"], self.designer.id)
+        self.assertEqual(response.data["month"], "2026-03")
+        self.assertAlmostEqual(response.data["total_kpi_score"], 15.0)
 
     def test_task_excellence_accepts_integers_and_floats_including_negative_values(self):
         cases = [
@@ -857,6 +1078,7 @@ class TaskAPITests(APITestCase):
                 {
                     "client": self.client_obj.id,
                     "task_name": f"Task {value}",
+                    "scope_of_work": self.scope_of_work.id,
                     "priority": Task.Priority.HIGH,
                     "excellence": value,
                 },
@@ -934,7 +1156,7 @@ class TaskAPITests(APITestCase):
             task_name="Restricted Task",
             instructions="Original brief",
             priority=Task.Priority.MEDIUM,
-            is_marked_completed_by_account_planner=True,
+            stage=Task.Stage.APPROVED,
             created_by=self.planner,
         )
         self.client.force_authenticate(art_director)
@@ -962,7 +1184,7 @@ class TaskAPITests(APITestCase):
             task_name="Restricted Task",
             instructions="Original brief",
             priority=Task.Priority.MEDIUM,
-            is_marked_completed_by_account_planner=True,
+            stage=Task.Stage.APPROVED,
             created_by=art_director,
         )
         self.client.force_authenticate(art_director)
@@ -989,6 +1211,52 @@ class TaskAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("is_marked_completed_by_account_planner", response.data)
+
+    def test_art_director_can_move_task_forward_and_backward_within_scope(self):
+        art_director = User.objects.create_user(
+            email="art-stage@test.com",
+            password="password123",
+            role=User.Role.ART_DIRECTOR,
+        )
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Art Director Workflow Task",
+            instructions="Original brief",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.COMPLETE,
+            created_by=self.planner,
+        )
+        self.client.force_authenticate(art_director)
+
+        forward_response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+            },
+            format="json",
+        )
+
+        self.assertEqual(forward_response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL)
+        derived_state = Task.completion_state_for_stage(task.stage)
+        self.assertTrue(derived_state["is_marked_completed_by_designer"])
+        self.assertTrue(derived_state["is_marked_completed_by_art_director"])
+
+        backward_response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.COMPLETE,
+            },
+            format="json",
+        )
+
+        self.assertEqual(backward_response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.COMPLETE)
+        derived_state = Task.completion_state_for_stage(task.stage)
+        self.assertTrue(derived_state["is_marked_completed_by_designer"])
+        self.assertFalse(derived_state["is_marked_completed_by_art_director"])
 
     def test_create_redo_task(self):
         original = Task.objects.create(
@@ -1039,7 +1307,129 @@ class TaskAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         task.refresh_from_db()
-        self.assertTrue(task.is_marked_completed_by_designer)
+        self.assertEqual(task.stage, Task.Stage.COMPLETE)
+
+    def test_designer_can_move_task_backward_within_own_stages(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Designer Workflow Task",
+            instructions="Do work",
+            priority=Task.Priority.MEDIUM,
+            designer=self.designer,
+            stage=Task.Stage.COMPLETE,
+        )
+        self.client.force_authenticate(self.designer)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.ON_GOING,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.ON_GOING)
+        self.assertFalse(Task.completion_state_for_stage(task.stage)["is_marked_completed_by_designer"])
+
+    def test_designer_can_move_task_from_complete_back_to_backlog(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Designer Reset Workflow Task",
+            instructions="Do work",
+            priority=Task.Priority.MEDIUM,
+            designer=self.designer,
+            stage=Task.Stage.COMPLETE,
+        )
+        self.client.force_authenticate(self.designer)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.BACKLOG,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.BACKLOG)
+        derived_state = Task.completion_state_for_stage(task.stage)
+        self.assertFalse(derived_state["is_marked_completed_by_designer"])
+        self.assertFalse(derived_state["is_marked_completed_by_art_director"])
+        self.assertFalse(derived_state["is_marked_completed_by_account_planner"])
+
+    def test_designer_can_move_task_from_backlog_to_ongoing(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Designer Forward Workflow Task",
+            instructions="Do work",
+            priority=Task.Priority.MEDIUM,
+            designer=self.designer,
+            stage=Task.Stage.BACKLOG,
+        )
+        self.client.force_authenticate(self.designer)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.ON_GOING,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.ON_GOING)
+        derived_state = Task.completion_state_for_stage(task.stage)
+        self.assertFalse(derived_state["is_marked_completed_by_designer"])
+        self.assertFalse(derived_state["is_marked_completed_by_art_director"])
+        self.assertFalse(derived_state["is_marked_completed_by_account_planner"])
+
+    def test_designer_cannot_move_task_beyond_own_stage_scope(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Designer Restricted Workflow Task",
+            instructions="Do work",
+            priority=Task.Priority.MEDIUM,
+            designer=self.designer,
+            stage=Task.Stage.COMPLETE,
+        )
+        self.client.force_authenticate(self.designer)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("stage", response.data)
+
+    def test_designer_cannot_skip_forward_from_backlog_to_complete(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Designer Forward Skip Task",
+            instructions="Do work",
+            priority=Task.Priority.MEDIUM,
+            designer=self.designer,
+            stage=Task.Stage.BACKLOG,
+        )
+        self.client.force_authenticate(self.designer)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.COMPLETE,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("stage", response.data)
 
     def test_account_planner_cannot_update_art_director_or_designer_completion_flags(self):
         task = Task.objects.create(
@@ -1061,8 +1451,9 @@ class TaskAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         task.refresh_from_db()
-        self.assertFalse(task.is_marked_completed_by_art_director)
-        self.assertFalse(task.is_marked_completed_by_designer)
+        derived_state = Task.completion_state_for_stage(task.stage)
+        self.assertFalse(derived_state["is_marked_completed_by_art_director"])
+        self.assertFalse(derived_state["is_marked_completed_by_designer"])
 
     def test_account_planner_can_still_update_own_completion_flag(self):
         task = Task.objects.create(
@@ -1083,7 +1474,62 @@ class TaskAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         task.refresh_from_db()
-        self.assertTrue(task.is_marked_completed_by_account_planner)
+        self.assertEqual(task.stage, Task.Stage.APPROVED)
+
+    def test_account_planner_can_move_task_forward_and_backward_within_scope(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Planner Workflow Task",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+        )
+
+        forward_response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.APPROVED,
+            },
+            format="json",
+        )
+
+        self.assertEqual(forward_response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.APPROVED)
+        self.assertTrue(Task.completion_state_for_stage(task.stage)["is_marked_completed_by_account_planner"])
+
+        backward_response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+            },
+            format="json",
+        )
+
+        self.assertEqual(backward_response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL)
+        self.assertFalse(Task.completion_state_for_stage(task.stage)["is_marked_completed_by_account_planner"])
+
+    def test_account_planner_cannot_skip_outside_own_scope(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Planner Restricted Workflow Task",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+        )
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.COMPLETE,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("stage", response.data)
 
     def test_designer_cannot_update_other_task_fields(self):
         task = Task.objects.create(

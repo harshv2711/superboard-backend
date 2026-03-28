@@ -27,6 +27,8 @@ ALLOWED_HOSTS = get_list("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost")
 # Application definition
 
 INSTALLED_APPS = [
+    "unfold",
+    "unfold.contrib.import_export",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -184,3 +186,9 @@ REST_FRAMEWORK = {
 }
 
 AUTH_USER_MODEL = "users.CustomUser"
+
+UNFOLD = {
+    "SITE_TITLE": "Superboard Admin",
+    "SITE_HEADER": "Superboard Administration",
+    "SITE_SYMBOL": "dashboard",
+}

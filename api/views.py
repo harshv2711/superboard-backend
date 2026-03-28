@@ -6,12 +6,14 @@ from rest_framework.exceptions import PermissionDenied
 from rest_framework.authtoken.models import Token
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.decorators import action
+from rest_framework.serializers import ValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
-from .models import Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TypeOfWork
+from .models import Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TaskOnStage, TaskStage, TypeOfWork
 from .permissions import (
     CanWriteTaskByRole,
+    IsAuthenticatedAndCanManageNegativeRemarks,
     IsClientOwnerOrReadOnly,
     is_account_planner,
     is_art_director,
@@ -28,6 +30,7 @@ from .serializers import (
     ClientAttachmentSerializer,
     ClientMonthlyAmountSerializer,
     ClientOwnerSerializer,
+    DesignerKpiSummarySerializer,
     EmailAuthTokenSerializer,
     GroupMemberSerializer,
     GroupSerializer,
@@ -41,8 +44,11 @@ from .serializers import (
     ServiceCategorySerializer,
     TaskSerializer,
     TaskAttachmentSerializer,
+    TaskOnStageSerializer,
+    TaskStageSerializer,
     TypeOfWorkSerializer,
 )
+from .utils.designer_kpi import calculate_designer_monthly_kpi
 
 
 class BrandViewSet(viewsets.ModelViewSet):
@@ -104,10 +110,19 @@ class TypeOfWorkViewSet(viewsets.ModelViewSet):
 class NegativeRemarkViewSet(viewsets.ModelViewSet):
     queryset = NegativeRemark.objects.all()
     serializer_class = NegativeRemarkSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [IsAuthenticatedAndCanManageNegativeRemarks]
     search_fields = ["remark_name", "description"]
     ordering_fields = ["id", "remark_name", "point", "created_at", "updated_at"]
     ordering = ["-created_at", "-id"]
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.task_links.exists():
+            return Response(
+                {"detail": "This negative remark cannot be deleted because it is already linked to one or more tasks."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return super().destroy(request, *args, **kwargs)
 
 
 class NegativeRemarkOnTaskViewSet(viewsets.ModelViewSet):
@@ -128,6 +143,25 @@ class TaskAttachmentViewSet(viewsets.ModelViewSet):
     search_fields = ["task__task_name", "task__client__name", "file"]
     ordering_fields = ["id", "task", "created_at", "updated_at"]
     ordering = ["-created_at", "-id"]
+
+
+class TaskStageViewSet(viewsets.ModelViewSet):
+    queryset = TaskStage.objects.all()
+    serializer_class = TaskStageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    search_fields = ["name"]
+    ordering_fields = ["id", "name", "created_at", "updated_at"]
+    ordering = ["id"]
+
+
+class TaskOnStageViewSet(viewsets.ModelViewSet):
+    queryset = TaskOnStage.objects.all().select_related("task_stage", "task", "task__client", "task__designer", "task__type_of_work")
+    serializer_class = TaskOnStageSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ["task_stage", "task"]
+    search_fields = ["task_stage__name", "task__task_name", "task__client__name", "task__designer__email"]
+    ordering_fields = ["id", "task_stage", "task", "created_at", "updated_at"]
+    ordering = ["task_stage__name", "-created_at", "-id"]
 
 
 class ClientViewSet(viewsets.ModelViewSet):
@@ -300,10 +334,10 @@ class TaskViewSet(viewsets.ModelViewSet):
             return
 
         if user_can_designer_update_task(self.request.user, task):
-            allowed_fields = {"is_marked_completed_by_designer"}
-            requested_fields = set(serializer.validated_data.keys())
+            allowed_fields = {"is_marked_completed_by_designer", "stage"}
+            requested_fields = set(serializer.initial_data.keys())
             if not requested_fields.issubset(allowed_fields):
-                raise PermissionDenied("Designers can only update their own completion flag.")
+                raise PermissionDenied("Designers can only update their own completion flag or stage.")
             serializer.save()
             return
 
@@ -330,6 +364,41 @@ class TaskViewSet(viewsets.ModelViewSet):
             raise PermissionDenied(
                 f"Cannot delete the task because {task_name} is associated with another task."
             ) from exc
+
+    @action(detail=False, methods=["get"], url_path="designer-kpi")
+    def designer_kpi(self, request):
+        month_value = (request.query_params.get("month") or "").strip()
+        if not month_value:
+            raise ValidationError({"month": "Month is required in YYYY-MM format."})
+
+        try:
+            year, month = month_value.split("-", 1)
+            year = int(year)
+            month = int(month)
+        except (AttributeError, TypeError, ValueError):
+            raise ValidationError({"month": "Month must be in YYYY-MM format."})
+
+        if month < 1 or month > 12:
+            raise ValidationError({"month": "Month must be between 01 and 12."})
+
+        designer_id_param = request.query_params.get("designer_id")
+        if is_designer(request.user):
+            designer_id = request.user.id
+        elif designer_id_param:
+            try:
+                designer_id = int(designer_id_param)
+            except (TypeError, ValueError):
+                raise ValidationError({"designer_id": "Designer id must be a valid integer."})
+        else:
+            raise ValidationError({"designer_id": "Designer id is required."})
+
+        payload = {
+            "designer_id": designer_id,
+            "month": f"{year:04d}-{month:02d}",
+            "total_kpi_score": calculate_designer_monthly_kpi(designer_id=designer_id, year=year, month=month),
+        }
+        serializer = DesignerKpiSummarySerializer(payload)
+        return Response(serializer.data)
 
     @action(detail=True, methods=["get"])
     def revisions(self, request, pk=None):

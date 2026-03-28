@@ -67,3 +67,12 @@ class CanWriteTaskByRole(BasePermission):
         if request.method in SAFE_METHODS:
             return True
         return user_can_fully_manage_task(request.user, obj) or user_can_designer_update_task(request.user, obj)
+
+
+class IsAuthenticatedAndCanManageNegativeRemarks(BasePermission):
+    def has_permission(self, request, view):
+        if not request.user or not request.user.is_authenticated:
+            return False
+        if request.method in SAFE_METHODS:
+            return True
+        return is_privileged_user(request.user) or is_art_director(request.user)

@@ -292,16 +292,45 @@ class TaskAttachment(models.Model):
         return f"Attachment #{self.id} for Task #{self.task_id}"
 
 
+class TaskStage(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["name"]
+        indexes = [
+            models.Index(fields=["name"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
 class Task(models.Model):
     class Priority(models.TextChoices):
         HIGH = "high", "High"
         MEDIUM = "medium", "Medium"
         LOW = "low", "Low"
 
+    class Stage(models.TextChoices):
+        BACKLOG = "backlog", "Backlog"
+        ON_GOING = "on_going", "Ongoing"
+        COMPLETE = "complete", "Complete"
+        APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL = (
+            "approved_by_art_director_waiting_for_approval",
+            "Approved By Art Director/ Waiting for approval",
+        )
+        APPROVED = "approved", "Approved"
+
     class RevisionType(models.TextChoices):
         SMALL = "small", "Small"
         MEDIUM = "medium", "Medium"
         LARGE = "large", "Large"
+
+    class PromotionType(models.TextChoices):
+        ORGANIC = "organic", "Organic"
+        SPONSORED = "sponsored", "Sponsored"
 
     client = models.ForeignKey(
         Client,
@@ -352,6 +381,11 @@ class Task(models.Model):
         choices=Priority.choices,
         default=Priority.MEDIUM,
     )
+    stage = models.CharField(
+        max_length=64,
+        choices=Stage.choices,
+        default=Stage.BACKLOG,
+    )
 
     designer = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -378,10 +412,14 @@ class Task(models.Model):
 
     target_date = models.DateField(null=True, blank=True)
     slides = models.PositiveIntegerField(default=1)
-    is_marked_completed_by_superadmin = models.BooleanField(default=False)
-    is_marked_completed_by_account_planner = models.BooleanField(default=False)
-    is_marked_completed_by_art_director = models.BooleanField(default=False)
-    is_marked_completed_by_designer = models.BooleanField(default=False)
+    impressions = models.PositiveIntegerField(null=True, blank=True)
+    ctr = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    engagement_rate = models.DecimalField(max_digits=6, decimal_places=2, null=True, blank=True)
+    promotion_type = models.CharField(
+        max_length=16,
+        choices=PromotionType.choices,
+        default=PromotionType.ORGANIC,
+    )
     have_major_changes = models.BooleanField(default=False)
     have_minor_changes = models.BooleanField(default=False)
 
@@ -401,6 +439,7 @@ class Task(models.Model):
         indexes = [
             models.Index(fields=["client"]),
             models.Index(fields=["priority"]),
+            models.Index(fields=["stage"]),
             models.Index(fields=["designer"]),
             models.Index(fields=["type_of_work"]),
             models.Index(fields=["scope_of_work"]),
@@ -411,8 +450,31 @@ class Task(models.Model):
             models.Index(fields=["redo_no"]),
         ]
 
+    @classmethod
+    def normalize_stage(cls, stage):
+        valid_stages = {choice for choice, _label in cls.Stage.choices}
+        return stage if stage in valid_stages else cls.Stage.BACKLOG
+
+    @classmethod
+    def completion_state_for_stage(cls, stage):
+        normalized_stage = cls.normalize_stage(stage)
+        return {
+            "is_marked_completed_by_superadmin": normalized_stage == cls.Stage.APPROVED,
+            "is_marked_completed_by_account_planner": normalized_stage == cls.Stage.APPROVED,
+            "is_marked_completed_by_art_director": normalized_stage in {
+                cls.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+                cls.Stage.APPROVED,
+            },
+            "is_marked_completed_by_designer": normalized_stage in {
+                cls.Stage.COMPLETE,
+                cls.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+                cls.Stage.APPROVED,
+            },
+        }
+
     def clean(self):
         super().clean()
+        self.stage = self.normalize_stage(self.stage)
         if self.pk and self.revision_of_id == self.pk:
             raise ValidationError({"revision_of": "A task cannot be a revision of itself."})
         if self.pk and self.redo_of_id == self.pk:
@@ -561,3 +623,31 @@ class Task(models.Model):
 
     def __str__(self):
         return f"#{self.id} | {self.client.name} | {self.task_name}"
+
+
+class TaskOnStage(models.Model):
+    task_stage = models.ForeignKey(
+        TaskStage,
+        on_delete=models.CASCADE,
+        related_name="task_links",
+    )
+    task = models.ForeignKey(
+        Task,
+        on_delete=models.CASCADE,
+        related_name="stage_links",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["task"], name="uniq_task_on_stage_task")
+        ]
+        indexes = [
+            models.Index(fields=["task_stage"]),
+            models.Index(fields=["task"]),
+        ]
+
+    def __str__(self):
+        return f"{self.task_stage.name} -> Task #{self.task_id}"

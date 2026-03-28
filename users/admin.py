@@ -1,12 +1,19 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin
+from django.contrib.auth.models import Group
+from unfold.admin import ModelAdmin
+from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 
 from .models import CustomUser, Employee
 
 
 @admin.register(CustomUser)
-class CustomUserAdmin(BaseUserAdmin):
+class CustomUserAdmin(BaseUserAdmin, ModelAdmin):
     model = CustomUser
+    form = UserChangeForm
+    add_form = UserCreationForm
+    change_password_form = AdminPasswordChangeForm
     list_per_page = 25
     ordering = ("-date_joined",)
     list_display = ("id", "email", "role", "first_name", "last_name", "is_staff", "is_active")
@@ -30,8 +37,16 @@ class CustomUserAdmin(BaseUserAdmin):
     )
 
 
+admin.site.unregister(Group)
+
+
+@admin.register(Group)
+class GroupAdmin(BaseGroupAdmin, ModelAdmin):
+    pass
+
+
 @admin.register(Employee)
-class EmployeeAdmin(admin.ModelAdmin):
+class EmployeeAdmin(ModelAdmin):
     list_display = ("id", "user", "designation", "salary", "created_at")
     list_display_links = ("id", "user")
     search_fields = ("user__email", "designation")

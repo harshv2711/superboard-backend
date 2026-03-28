@@ -21,6 +21,8 @@ from .models import (
     ServiceCategory,
     Task,
     TaskAttachment,
+    TaskOnStage,
+    TaskStage,
     TypeOfWork,
 )
 
@@ -282,9 +284,11 @@ class ServiceCategorySerializer(serializers.ModelSerializer):
 
 
 class NegativeRemarkSerializer(serializers.ModelSerializer):
+    task_count = serializers.SerializerMethodField()
+
     class Meta:
         model = NegativeRemark
-        fields = ["id", "remark_name", "description", "point", "created_at", "updated_at"]
+        fields = ["id", "remark_name", "description", "point", "task_count", "created_at", "updated_at"]
         read_only_fields = ["id", "created_at", "updated_at"]
 
     def validate_remark_name(self, value):
@@ -295,6 +299,9 @@ class NegativeRemarkSerializer(serializers.ModelSerializer):
 
     def validate_description(self, value):
         return value.strip()
+
+    def get_task_count(self, obj):
+        return obj.task_links.count()
 
 
 class NegativeRemarkOnTaskSerializer(serializers.ModelSerializer):
@@ -345,6 +352,89 @@ class TaskAttachmentSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "task_name", "file_url", "created_at", "updated_at"]
 
 
+class TaskStageSerializer(serializers.ModelSerializer):
+    task_count = serializers.SerializerMethodField()
+
+    class Meta:
+        model = TaskStage
+        fields = ["id", "name", "task_count", "created_at", "updated_at"]
+        read_only_fields = ["id", "task_count", "created_at", "updated_at"]
+
+    def validate_name(self, value):
+        cleaned = value.strip()
+        if not cleaned:
+            raise serializers.ValidationError("Task stage name cannot be empty.")
+
+        qs = TaskStage.objects.filter(name__iexact=cleaned)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Task stage with this name already exists.")
+
+        return cleaned
+
+    def get_task_count(self, obj):
+        return obj.task_links.count()
+
+
+class TaskOnStageSerializer(serializers.ModelSerializer):
+    task_stage_name = serializers.CharField(source="task_stage.name", read_only=True)
+    task_name = serializers.CharField(source="task.task_name", read_only=True)
+    client_name = serializers.CharField(source="task.client.name", read_only=True)
+    designer_name = serializers.CharField(source="task.designer.email", read_only=True)
+    type_of_work_name = serializers.CharField(source="task.type_of_work.work_type_name", read_only=True)
+    target_date = serializers.DateField(source="task.target_date", read_only=True)
+    priority = serializers.CharField(source="task.priority", read_only=True)
+
+    class Meta:
+        model = TaskOnStage
+        fields = [
+            "id",
+            "task_stage",
+            "task_stage_name",
+            "task",
+            "task_name",
+            "client_name",
+            "designer_name",
+            "type_of_work_name",
+            "target_date",
+            "priority",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id",
+            "task_stage_name",
+            "task_name",
+            "client_name",
+            "designer_name",
+            "type_of_work_name",
+            "target_date",
+            "priority",
+            "created_at",
+            "updated_at",
+        ]
+
+    def validate(self, attrs):
+        task = attrs.get("task") or getattr(self.instance, "task", None)
+        if not task:
+            return attrs
+
+        qs = TaskOnStage.objects.filter(task=task)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError({"task": "This task is already assigned to a stage."})
+
+        return attrs
+
+
+class DesignerKpiSummarySerializer(serializers.Serializer):
+    designer_id = serializers.IntegerField()
+    month = serializers.CharField()
+    total_kpi_score = serializers.FloatField()
+
+
 class ClientOwnerSerializer(serializers.ModelSerializer):
     user_email = serializers.EmailField(source="user.email", read_only=True)
     client_name = serializers.CharField(source="client.name", read_only=True)
@@ -385,6 +475,10 @@ class TaskSerializer(serializers.ModelSerializer):
     redo_of_task_id = serializers.SerializerMethodField()
     isRevision = serializers.SerializerMethodField()
     isRedo = serializers.SerializerMethodField()
+    is_marked_completed_by_superadmin = serializers.SerializerMethodField()
+    is_marked_completed_by_account_planner = serializers.SerializerMethodField()
+    is_marked_completed_by_art_director = serializers.SerializerMethodField()
+    is_marked_completed_by_designer = serializers.SerializerMethodField()
 
     class Meta:
         model = Task
@@ -408,6 +502,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "InstructionsByArtDirector",
             "revision_type",
             "priority",
+            "stage",
             "designer",
             "designer_name",
             "type_of_work",
@@ -417,6 +512,10 @@ class TaskSerializer(serializers.ModelSerializer):
             "created_by_name",
             "target_date",
             "slides",
+            "impressions",
+            "ctr",
+            "engagement_rate",
+            "promotion_type",
             "is_marked_completed_by_superadmin",
             "is_marked_completed_by_account_planner",
             "is_marked_completed_by_art_director",
@@ -439,6 +538,16 @@ class TaskSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Slides must be at least 1.")
         return value
 
+    def validate_ctr(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("CTR cannot be negative.")
+        return value
+
+    def validate_engagement_rate(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("Engagement rate cannot be negative.")
+        return value
+
     def validate(self, attrs):
         """
         If revision_of is set, client can be omitted and will be auto-filled in model.save().
@@ -459,10 +568,10 @@ class TaskSerializer(serializers.ModelSerializer):
                 {"scope_of_work": "Selected scope of work must belong to the same client as the task."}
             )
 
-        if not revision_of and not redo_of and not scope_of_work:
+        if self.instance is None and not revision_of and not redo_of and not scope_of_work:
             raise serializers.ValidationError({"scope_of_work": "Scope of work is required."})
 
-        if not revision_of and not redo_of and not str(effective_task_name or "").strip():
+        if self.instance is None and not revision_of and not redo_of and not str(effective_task_name or "").strip():
             raise serializers.ValidationError({"task_name": "Task name is required."})
 
         effective_have_major_changes = attrs.get(
@@ -473,6 +582,70 @@ class TaskSerializer(serializers.ModelSerializer):
             "have_minor_changes",
             getattr(self.instance, "have_minor_changes", False),
         )
+        current_stage = Task.normalize_stage(getattr(self.instance, "stage", Task.Stage.BACKLOG))
+        current_completion_state = Task.completion_state_for_stage(current_stage)
+        effective_stage = self._resolve_effective_stage(attrs)
+        effective_completion_state = Task.completion_state_for_stage(effective_stage)
+
+        current_account_planner_completed = current_completion_state["is_marked_completed_by_account_planner"]
+        current_art_director_completed = current_completion_state["is_marked_completed_by_art_director"]
+        current_designer_completed = current_completion_state["is_marked_completed_by_designer"]
+        effective_account_planner_completed = effective_completion_state["is_marked_completed_by_account_planner"]
+        effective_art_director_completed = effective_completion_state["is_marked_completed_by_art_director"]
+        effective_designer_completed = effective_completion_state["is_marked_completed_by_designer"]
+
+        legacy_completion_keys = {
+            "is_marked_completed_by_superadmin",
+            "is_marked_completed_by_account_planner",
+            "is_marked_completed_by_art_director",
+            "is_marked_completed_by_designer",
+        }
+        stage_change_requested = "stage" in attrs or any(key in self.initial_data for key in legacy_completion_keys)
+
+        if self.instance is not None and stage_change_requested and user and user.is_authenticated and not user.is_superuser:
+            workflow_order = [
+                Task.Stage.BACKLOG,
+                Task.Stage.ON_GOING,
+                Task.Stage.COMPLETE,
+                Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+                Task.Stage.APPROVED,
+            ]
+            next_stage = effective_stage
+
+            if current_stage != next_stage:
+                allowed_stage_scopes = {
+                    User.Role.DESIGNER: {
+                        Task.Stage.BACKLOG,
+                        Task.Stage.ON_GOING,
+                        Task.Stage.COMPLETE,
+                    },
+                    User.Role.ART_DIRECTOR: {
+                        Task.Stage.COMPLETE,
+                        Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+                    },
+                    User.Role.ACCOUNT_PLANNER: {
+                        Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+                        Task.Stage.APPROVED,
+                    },
+                }
+
+                allowed_stages = allowed_stage_scopes.get(user.role)
+                if allowed_stages is not None:
+                    if current_stage not in allowed_stages or next_stage not in allowed_stages:
+                        raise serializers.ValidationError(
+                            {
+                                "stage": "You can only move tasks within the stages allowed for your role."
+                            }
+                        )
+
+                    current_index = workflow_order.index(current_stage)
+                    next_index = workflow_order.index(next_stage)
+                    if next_index > current_index and (next_index - current_index) != 1:
+                        raise serializers.ValidationError(
+                            {
+                                "stage": "You can only move tasks one step forward within your workflow."
+                            }
+                        )
 
         if revision_of and not effective_have_major_changes and not effective_have_minor_changes:
             raise serializers.ValidationError(
@@ -491,22 +664,10 @@ class TaskSerializer(serializers.ModelSerializer):
             errors = {
                 field_name: message
                 for field_name, message in forbidden_fields.items()
-                if field_name in attrs
+                if field_name in self.initial_data
             }
             if errors:
                 raise serializers.ValidationError(errors)
-            effective_account_planner_completed = attrs.get(
-                "is_marked_completed_by_account_planner",
-                getattr(self.instance, "is_marked_completed_by_account_planner", False),
-            )
-            effective_art_director_completed = attrs.get(
-                "is_marked_completed_by_art_director",
-                getattr(self.instance, "is_marked_completed_by_art_director", False),
-            )
-            effective_designer_completed = attrs.get(
-                "is_marked_completed_by_designer",
-                getattr(self.instance, "is_marked_completed_by_designer", False),
-            )
             if (
                 effective_account_planner_completed
                 and (not effective_art_director_completed or not effective_designer_completed)
@@ -527,23 +688,13 @@ class TaskSerializer(serializers.ModelSerializer):
             errors = {
                 field_name: message
                 for field_name, message in forbidden_fields.items()
-                if field_name in attrs
+                if field_name in self.initial_data
             }
             if errors:
                 raise serializers.ValidationError(errors)
-            current_account_planner_completed = getattr(self.instance, "is_marked_completed_by_account_planner", False)
-            current_art_director_completed = getattr(self.instance, "is_marked_completed_by_art_director", False)
-            effective_art_director_completed = attrs.get(
-                "is_marked_completed_by_art_director",
-                current_art_director_completed,
-            )
-            effective_designer_completed = attrs.get(
-                "is_marked_completed_by_designer",
-                getattr(self.instance, "is_marked_completed_by_designer", False),
-            )
             if (
                 current_account_planner_completed
-                and "is_marked_completed_by_art_director" in attrs
+                and "is_marked_completed_by_art_director" in self.initial_data
                 and effective_art_director_completed != current_art_director_completed
             ):
                 raise serializers.ValidationError(
@@ -562,18 +713,16 @@ class TaskSerializer(serializers.ModelSerializer):
                     }
                 )
         if user and user.is_authenticated and not user.is_superuser and user.role == User.Role.DESIGNER:
-            allowed_fields = {"is_marked_completed_by_designer"}
+            allowed_fields = {"is_marked_completed_by_designer", "stage"}
             forbidden_fields = {
-                field_name: "Designers can only update their own completion flag."
-                for field_name in attrs
+                field_name: "Designers can only update their own completion flag or stage."
+                for field_name in self.initial_data
                 if field_name not in allowed_fields
             }
             if forbidden_fields:
                 raise serializers.ValidationError(forbidden_fields)
-            current_designer_completed = getattr(self.instance, "is_marked_completed_by_designer", False)
-            next_designer_completed = attrs.get("is_marked_completed_by_designer", current_designer_completed)
-            if "is_marked_completed_by_designer" in attrs and next_designer_completed != current_designer_completed:
-                if getattr(self.instance, "is_marked_completed_by_art_director", False):
+            if effective_designer_completed != current_designer_completed:
+                if current_art_director_completed:
                     raise serializers.ValidationError(
                         {
                             "is_marked_completed_by_designer": (
@@ -581,7 +730,7 @@ class TaskSerializer(serializers.ModelSerializer):
                             )
                         }
                     )
-                if getattr(self.instance, "is_marked_completed_by_account_planner", False):
+                if current_account_planner_completed:
                     raise serializers.ValidationError(
                         {
                             "is_marked_completed_by_designer": (
@@ -589,7 +738,7 @@ class TaskSerializer(serializers.ModelSerializer):
                             )
                         }
                     )
-                if getattr(self.instance, "is_marked_completed_by_superadmin", False):
+                if current_completion_state["is_marked_completed_by_superadmin"]:
                     raise serializers.ValidationError(
                         {
                             "is_marked_completed_by_designer": (
@@ -597,6 +746,8 @@ class TaskSerializer(serializers.ModelSerializer):
                             )
                         }
                     )
+
+        attrs["stage"] = effective_stage
         return attrs
 
     def get_isRevision(self, obj):
@@ -607,6 +758,53 @@ class TaskSerializer(serializers.ModelSerializer):
 
     def get_redo_of_task_id(self, obj):
         return obj.redo_of_id
+
+    def get_is_marked_completed_by_superadmin(self, obj):
+        return Task.completion_state_for_stage(obj.stage)["is_marked_completed_by_superadmin"]
+
+    def get_is_marked_completed_by_account_planner(self, obj):
+        return Task.completion_state_for_stage(obj.stage)["is_marked_completed_by_account_planner"]
+
+    def get_is_marked_completed_by_art_director(self, obj):
+        return Task.completion_state_for_stage(obj.stage)["is_marked_completed_by_art_director"]
+
+    def get_is_marked_completed_by_designer(self, obj):
+        return Task.completion_state_for_stage(obj.stage)["is_marked_completed_by_designer"]
+
+    def _resolve_effective_stage(self, attrs):
+        raw_stage = attrs.get("stage", getattr(self.instance, "stage", Task.Stage.BACKLOG))
+        stage = Task.normalize_stage(raw_stage)
+
+        legacy_completion_keys = [
+            "is_marked_completed_by_superadmin",
+            "is_marked_completed_by_account_planner",
+            "is_marked_completed_by_art_director",
+            "is_marked_completed_by_designer",
+        ]
+        if not any(key in self.initial_data for key in legacy_completion_keys):
+            return stage
+
+        def as_bool(key):
+            value = self.initial_data.get(key)
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                return value.strip().lower() in {"1", "true", "yes", "on"}
+            return bool(value)
+
+        if as_bool("is_marked_completed_by_superadmin") or as_bool("is_marked_completed_by_account_planner"):
+            return Task.Stage.APPROVED
+        if as_bool("is_marked_completed_by_art_director"):
+            return Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL
+        if as_bool("is_marked_completed_by_designer"):
+            return Task.Stage.COMPLETE
+        if "is_marked_completed_by_designer" in self.initial_data:
+            return Task.Stage.ON_GOING if stage != Task.Stage.BACKLOG else Task.Stage.BACKLOG
+        if "is_marked_completed_by_art_director" in self.initial_data:
+            return Task.Stage.COMPLETE
+        if "is_marked_completed_by_account_planner" in self.initial_data:
+            return Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL
+        return stage
 
 
 class EmailAuthTokenSerializer(serializers.Serializer):

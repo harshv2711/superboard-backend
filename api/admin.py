@@ -4,8 +4,10 @@ from django.contrib.auth import get_user_model
 from import_export import fields, resources
 from import_export.admin import ImportExportModelAdmin
 from import_export.widgets import DateWidget, ForeignKeyWidget
+from unfold.admin import ModelAdmin
+from unfold.contrib.import_export.forms import ExportForm, ImportForm
 
-from .models import Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TypeOfWork
+from .models import Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TaskOnStage, TaskStage, TypeOfWork
 
 User = get_user_model()
 
@@ -86,16 +88,17 @@ class TaskResource(resources.ModelResource):
             "InstructionsByArtDirector",
             "revision_type",
             "priority",
+            "stage",
             "designer",
             "created_by",
             "type_of_work",
             "scope_of_work",
             "target_date",
             "slides",
-            "is_marked_completed_by_superadmin",
-            "is_marked_completed_by_account_planner",
-            "is_marked_completed_by_art_director",
-            "is_marked_completed_by_designer",
+            "impressions",
+            "ctr",
+            "engagement_rate",
+            "promotion_type",
             "have_major_changes",
             "have_minor_changes",
             "revision_of",
@@ -116,8 +119,10 @@ class TaskResource(resources.ModelResource):
 
 
 @admin.register(Brand)
-class BrandAdmin(ImportExportModelAdmin):
+class BrandAdmin(ModelAdmin, ImportExportModelAdmin):
     resource_class = BrandResource
+    import_form_class = ImportForm
+    export_form_class = ExportForm
 
     list_display = ("name",)
     search_fields = ("name",)
@@ -125,14 +130,14 @@ class BrandAdmin(ImportExportModelAdmin):
 
 
 @admin.register(Group)
-class GroupAdmin(admin.ModelAdmin):
+class GroupAdmin(ModelAdmin):
     list_display = ("id", "name", "created_at")
     search_fields = ("name",)
     ordering = ("name",)
 
 
 @admin.register(GroupMember)
-class GroupMemberAdmin(admin.ModelAdmin):
+class GroupMemberAdmin(ModelAdmin):
     list_display = ("id", "group", "user", "created_at")
     search_fields = ("group__name", "user__email", "user__first_name", "user__last_name")
     list_filter = ("group", "user")
@@ -141,28 +146,28 @@ class GroupMemberAdmin(admin.ModelAdmin):
 
 
 @admin.register(TypeOfWork)
-class TypeOfWorkAdmin(admin.ModelAdmin):
+class TypeOfWorkAdmin(ModelAdmin):
     list_display = ("id", "work_type_name", "point", "redo_point", "major_changes_point", "minor_changes_point")
     search_fields = ("work_type_name",)
     ordering = ("work_type_name",)
 
 
 @admin.register(ServiceCategory)
-class ServiceCategoryAdmin(admin.ModelAdmin):
+class ServiceCategoryAdmin(ModelAdmin):
     list_display = ("id", "name", "description")
     search_fields = ("name", "description")
     ordering = ("name",)
 
 
 @admin.register(NegativeRemark)
-class NegativeRemarkAdmin(admin.ModelAdmin):
+class NegativeRemarkAdmin(ModelAdmin):
     list_display = ("id", "remark_name", "point", "created_at")
     search_fields = ("remark_name", "description")
     ordering = ("-created_at", "-id")
 
 
 @admin.register(NegativeRemarkOnTask)
-class NegativeRemarkOnTaskAdmin(admin.ModelAdmin):
+class NegativeRemarkOnTaskAdmin(ModelAdmin):
     list_display = ("id", "task", "negative_remark", "created_at")
     search_fields = ("task__task_name", "task__client__name", "negative_remark__remark_name")
     list_filter = ("task__client", "negative_remark")
@@ -171,7 +176,7 @@ class NegativeRemarkOnTaskAdmin(admin.ModelAdmin):
 
 
 @admin.register(TaskAttachment)
-class TaskAttachmentAdmin(admin.ModelAdmin):
+class TaskAttachmentAdmin(ModelAdmin):
     list_display = ("id", "task", "file", "created_at")
     search_fields = ("task__task_name", "task__client__name", "file")
     list_filter = ("task__client", "created_at")
@@ -179,8 +184,24 @@ class TaskAttachmentAdmin(admin.ModelAdmin):
     autocomplete_fields = ("task",)
 
 
+@admin.register(TaskStage)
+class TaskStageAdmin(ModelAdmin):
+    list_display = ("id", "name", "created_at")
+    search_fields = ("name",)
+    ordering = ("name",)
+
+
+@admin.register(TaskOnStage)
+class TaskOnStageAdmin(ModelAdmin):
+    list_display = ("id", "task_stage", "task", "created_at")
+    search_fields = ("task_stage__name", "task__task_name", "task__client__name")
+    list_filter = ("task_stage", "created_at")
+    ordering = ("-created_at", "-id")
+    autocomplete_fields = ("task_stage", "task")
+
+
 @admin.register(Client)
-class ClientAdmin(admin.ModelAdmin):
+class ClientAdmin(ModelAdmin):
     list_display = (
         "id",
         "name",
@@ -195,7 +216,7 @@ class ClientAdmin(admin.ModelAdmin):
 
 
 @admin.register(ClientAttachment)
-class ClientAttachmentAdmin(admin.ModelAdmin):
+class ClientAttachmentAdmin(ModelAdmin):
     list_display = ("id", "client", "file", "created_at")
     search_fields = ("client__name", "file")
     list_filter = ("client", "created_at")
@@ -204,7 +225,7 @@ class ClientAttachmentAdmin(admin.ModelAdmin):
 
 
 @admin.register(ClientMonthlyAmount)
-class ClientMonthlyAmountAdmin(admin.ModelAdmin):
+class ClientMonthlyAmountAdmin(ModelAdmin):
     list_display = ("id", "client", "date", "amt", "created_at")
     search_fields = ("client__name",)
     list_filter = ("client", "date")
@@ -213,7 +234,7 @@ class ClientMonthlyAmountAdmin(admin.ModelAdmin):
 
 
 @admin.register(ClientOwner)
-class ClientOwnerAdmin(admin.ModelAdmin):
+class ClientOwnerAdmin(ModelAdmin):
     list_display = ("id", "user", "client", "created_at")
     search_fields = ("user__email", "client__name")
     list_filter = ("user", "client")
@@ -222,7 +243,7 @@ class ClientOwnerAdmin(admin.ModelAdmin):
 
 
 @admin.register(ScopeOfWork)
-class ScopeOfWorkAdmin(admin.ModelAdmin):
+class ScopeOfWorkAdmin(ModelAdmin):
     list_display = (
         "id",
         "client",
@@ -242,9 +263,11 @@ class ScopeOfWorkAdmin(admin.ModelAdmin):
 
 
 @admin.register(Task)
-class TaskAdmin(ImportExportModelAdmin):
+class TaskAdmin(ModelAdmin, ImportExportModelAdmin):
     form = TaskAdminForm
     resource_class = TaskResource
+    import_form_class = ImportForm
+    export_form_class = ExportForm
 
     list_display = (
         "id",
@@ -254,17 +277,22 @@ class TaskAdmin(ImportExportModelAdmin):
         "task_kind",
         "revision_type",
         "priority",
+        "stage",
         "designer",
         "created_by",
         "type_of_work",
         "target_date",
         "slides",
+        "impressions",
+        "ctr",
+        "engagement_rate",
+        "promotion_type",
         "excellence",
         "excellence_reason",
         "revision_of",
         "redo_of",
     )
-    list_filter = ("client", "scope_of_work", "priority", "revision_type", "designer", "created_by", "target_date")
+    list_filter = ("client", "scope_of_work", "priority", "stage", "revision_type", "designer", "created_by", "target_date")
     search_fields = ("id", "task_name", "instructions", "client__name", "scope_of_work__deliverable_name", "designer__email", "created_by__email")
     ordering = ("-target_date", "-created_at")
     autocomplete_fields = ("client", "scope_of_work", "designer", "created_by", "type_of_work", "revision_of", "redo_of")
@@ -272,24 +300,12 @@ class TaskAdmin(ImportExportModelAdmin):
     readonly_fields = ("id", "created_at", "updated_at")
 
     fieldsets = (
-        ("Core", {"fields": ("id", "client", "scope_of_work", "priority", "designer", "created_by", "type_of_work")}),
+        ("Core", {"fields": ("id", "client", "scope_of_work", "priority", "stage", "designer", "created_by", "type_of_work")}),
         ("Task Details", {"fields": ("task_name", "instructions", "InstructionsByArtDirector", "revision_type")}),
-        ("Timeline", {"fields": ("target_date", "slides")}),
+        ("Timeline", {"fields": ("target_date", "slides", "impressions", "ctr", "engagement_rate", "promotion_type")}),
         ("Revision", {"fields": ("revision_of", "revision_no", "revision_count")}),
         ("Redo", {"fields": ("redo_of", "redo_no", "redo_count")}),
-        (
-            "Completion",
-            {
-                "fields": (
-                    "is_marked_completed_by_superadmin",
-                    "is_marked_completed_by_account_planner",
-                    "is_marked_completed_by_art_director",
-                    "is_marked_completed_by_designer",
-                    "have_major_changes",
-                    "have_minor_changes",
-                )
-            },
-        ),
+        ("Completion", {"fields": ("have_major_changes", "have_minor_changes")}),
         ("Scoring", {"fields": ("excellence", "excellence_reason")}),
         ("System", {"fields": ("created_at", "updated_at")}),
     )

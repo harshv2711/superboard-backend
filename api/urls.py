@@ -21,6 +21,8 @@ from .views import (
     ServiceCategoryViewSet,
     TaskViewSet,
     TaskAttachmentViewSet,
+    TaskOnStageViewSet,
+    TaskStageViewSet,
     TypeOfWorkViewSet,
 )
 
@@ -33,6 +35,10 @@ router.register(r"type-of-work", TypeOfWorkViewSet, basename="type-of-work")
 router.register(r"negative-remarks", NegativeRemarkViewSet, basename="negative-remark")
 router.register(r"negative-remarks-on-task", NegativeRemarkOnTaskViewSet, basename="negative-remark-on-task")
 router.register(r"task-attachments", TaskAttachmentViewSet, basename="task-attachment")
+router.register(r"task-stages", TaskStageViewSet, basename="task-stage")
+router.register(r"task-on-stages", TaskOnStageViewSet, basename="task-on-stage")
+router.register(r"taskstage", TaskStageViewSet, basename="taskstage")
+router.register(r"taskonstage", TaskOnStageViewSet, basename="taskonstage")
 router.register(r"client-attachments", ClientAttachmentViewSet, basename="client-attachment")
 router.register(r"client-monthly-amounts", ClientMonthlyAmountViewSet, basename="client-monthly-amount")
 router.register(r"clients", ClientViewSet, basename="client")

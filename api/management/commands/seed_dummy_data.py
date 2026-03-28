@@ -17,6 +17,15 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        def stage_from_completion_flags(*, planner_completed=False, art_director_completed=False, designer_completed=False):
+            if planner_completed:
+                return Task.Stage.APPROVED
+            if art_director_completed:
+                return Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL
+            if designer_completed:
+                return Task.Stage.COMPLETE
+            return Task.Stage.ON_GOING
+
         bulk_tasks = max(0, options["bulk_tasks"])
         user_model = get_user_model()
         pivot_client_names = [
@@ -378,9 +387,7 @@ class Command(BaseCommand):
                         {
                             "designer": designer_order[(task_index + 1) % len(designer_order)],
                             "priority": priorities[(task_index + 1) % len(priorities)],
-                            "is_marked_completed_by_account_planner": False,
-                            "is_marked_completed_by_art_director": False,
-                            "is_marked_completed_by_designer": (task_index % 2 == 0),
+                            "stage": stage_from_completion_flags(designer_completed=(task_index % 2 == 0)),
                         }
                     ]
 
@@ -389,9 +396,11 @@ class Command(BaseCommand):
                             {
                                 "designer": designer_order[(task_index + 2) % len(designer_order)],
                                 "priority": priorities[(task_index + 2) % len(priorities)],
-                                "is_marked_completed_by_account_planner": (task_index % 2 == 0),
-                                "is_marked_completed_by_art_director": (task_index % 2 == 0),
-                                "is_marked_completed_by_designer": True,
+                                "stage": stage_from_completion_flags(
+                                    planner_completed=(task_index % 2 == 0),
+                                    art_director_completed=(task_index % 2 == 0),
+                                    designer_completed=True,
+                                ),
                             }
                         )
 
@@ -406,9 +415,11 @@ class Command(BaseCommand):
                             ),
                             "priority": priority,
                             "target_date": current_day + timedelta(days=2),
-                            "is_marked_completed_by_account_planner": planner_completed,
-                            "is_marked_completed_by_art_director": art_director_completed,
-                            "is_marked_completed_by_designer": designer_completed,
+                            "stage": stage_from_completion_flags(
+                                planner_completed=planner_completed,
+                                art_director_completed=art_director_completed,
+                                designer_completed=designer_completed,
+                            ),
                             "revisions": [
                                 {
                                     **revision,
@@ -454,9 +465,7 @@ class Command(BaseCommand):
                     instructions=item["instructions"],
                     priority=item["priority"],
                     designer=designer,
-                    is_marked_completed_by_account_planner=item["is_marked_completed_by_account_planner"],
-                    is_marked_completed_by_art_director=item["is_marked_completed_by_art_director"],
-                    is_marked_completed_by_designer=item["is_marked_completed_by_designer"],
+                    stage=item["stage"],
                 )
                 created_tasks += 1
             else:
@@ -466,9 +475,7 @@ class Command(BaseCommand):
                     ("priority", item["priority"]),
                     ("designer", designer),
                     ("target_date", item["target_date"]),
-                    ("is_marked_completed_by_account_planner", item["is_marked_completed_by_account_planner"]),
-                    ("is_marked_completed_by_art_director", item["is_marked_completed_by_art_director"]),
-                    ("is_marked_completed_by_designer", item["is_marked_completed_by_designer"]),
+                    ("stage", item["stage"]),
                 ]:
                     if getattr(task, attr) != value:
                         setattr(task, attr, value)
@@ -486,9 +493,7 @@ class Command(BaseCommand):
                     "instructions": f"Revision pass {index} for: {item['instructions']}",
                     "priority": revision_data["priority"],
                     "target_date": revision_data["target_date"],
-                    "is_marked_completed_by_account_planner": revision_data["is_marked_completed_by_account_planner"],
-                    "is_marked_completed_by_art_director": revision_data["is_marked_completed_by_art_director"],
-                    "is_marked_completed_by_designer": revision_data["is_marked_completed_by_designer"],
+                    "stage": revision_data["stage"],
                 }
 
                 revision = Task.objects.filter(revision_of=task, revision_no=index).order_by("id").first()
@@ -535,6 +540,11 @@ class Command(BaseCommand):
                 planner_completed = index % 5 == 0
                 art_director_completed = index % 3 == 0 or planner_completed
                 designer_completed = index % 2 == 0 or art_director_completed
+                stage = stage_from_completion_flags(
+                    planner_completed=planner_completed,
+                    art_director_completed=art_director_completed,
+                    designer_completed=designer_completed,
+                )
 
                 task, task_created = Task.objects.get_or_create(
                     client=client,
@@ -545,9 +555,7 @@ class Command(BaseCommand):
                         "priority": priority,
                         "designer": designer,
                         "target_date": target_date,
-                        "is_marked_completed_by_account_planner": planner_completed,
-                        "is_marked_completed_by_art_director": art_director_completed,
-                        "is_marked_completed_by_designer": designer_completed,
+                        "stage": stage,
                     },
                 )
 
@@ -566,9 +574,7 @@ class Command(BaseCommand):
                             "priority": priority,
                             "designer": designer,
                             "target_date": target_date + timedelta(days=1),
-                            "is_marked_completed_by_account_planner": False,
-                            "is_marked_completed_by_art_director": False,
-                            "is_marked_completed_by_designer": True,
+                            "stage": Task.Stage.COMPLETE,
                         },
                     )
                     if rev_created:
