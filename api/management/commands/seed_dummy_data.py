@@ -36,9 +36,15 @@ class Command(BaseCommand):
             default=0,
             help="Create additional standalone tasks for pagination and stress testing.",
         )
+        parser.add_argument(
+            "--clear-only",
+            action="store_true",
+            help="Delete the dummy data created by this command without reseeding it.",
+        )
 
     def handle(self, *args, **options):
         bulk_tasks = max(0, options["bulk_tasks"])
+        clear_only = bool(options["clear_only"])
         user_model = get_user_model()
 
         user_seed = [
@@ -212,6 +218,21 @@ class Command(BaseCommand):
             },
         ]
 
+        seeded_user_emails = [item["email"] for item in user_seed]
+        seeded_client_names = [item["name"] for item in client_seed]
+        seeded_brand_names = [item["name"] for item in client_seed]
+        seeded_service_category_names = [name for name, _description in service_categories_seed]
+        seeded_type_of_work_names = [name for name, *_rest in type_of_work_seed]
+        seeded_negative_remark_names = [name for name, _description, _point in negative_remarks_seed]
+        seeded_group_names = ["Design Studio", "Planning Cell", "Creative Review"]
+        seeded_stage_names = [
+            "Initiate",
+            "Ongoing",
+            "Complete",
+            "Approved By Art Director",
+            "Approved by Client",
+        ]
+
         scope_seed = [
             {
                 "client": "Web Packaging Solution",
@@ -278,7 +299,7 @@ class Command(BaseCommand):
                 "designer": "ava_designer",
                 "created_by": "rhea_planner",
                 "target_date": date(2026, 3, 30),
-                "stage": Task.Stage.COMPLETE,
+                "stage": Task.Stage.APPROVED,
                 "impressions": 1200,
                 "ctr": Decimal("1.20"),
                 "engagement_rate": Decimal("3.40"),
@@ -302,8 +323,8 @@ class Command(BaseCommand):
                     {
                         "redo_no": 1,
                         "designer": "liam_creative",
-                        "target_date": date(2026, 4, 2),
-                        "stage": Task.Stage.ON_GOING,
+                        "target_date": date(2026, 3, 29),
+                        "stage": Task.Stage.APPROVED,
                     }
                 ],
             },
@@ -321,7 +342,7 @@ class Command(BaseCommand):
                 "designer": "maya_visuals",
                 "created_by": "arjun_planner",
                 "target_date": date(2026, 3, 30),
-                "stage": Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+                "stage": Task.Stage.APPROVED,
                 "impressions": 2400,
                 "ctr": Decimal("1.75"),
                 "engagement_rate": Decimal("4.80"),
@@ -335,7 +356,7 @@ class Command(BaseCommand):
                         "revision_no": 1,
                         "designer": "noah_motion",
                         "target_date": date(2026, 3, 31),
-                        "stage": Task.Stage.COMPLETE,
+                        "stage": Task.Stage.APPROVED,
                         "have_major_changes": False,
                         "have_minor_changes": True,
                         "revision_type": Task.RevisionType.SMALL,
@@ -356,8 +377,8 @@ class Command(BaseCommand):
                 "promotion_type": Task.PromotionType.SPONSORED,
                 "designer": "liam_creative",
                 "created_by": "rhea_planner",
-                "target_date": date(2026, 4, 3),
-                "stage": Task.Stage.ON_GOING,
+                "target_date": date(2026, 3, 28),
+                "stage": Task.Stage.APPROVED,
                 "impressions": 1800,
                 "ctr": Decimal("0.95"),
                 "engagement_rate": Decimal("2.30"),
@@ -382,7 +403,7 @@ class Command(BaseCommand):
                 "promotion_type": Task.PromotionType.ORGANIC,
                 "designer": "noah_motion",
                 "created_by": "arjun_planner",
-                "target_date": date(2026, 2, 26),
+                "target_date": date(2026, 3, 26),
                 "stage": Task.Stage.APPROVED,
                 "impressions": 950,
                 "ctr": Decimal("0.60"),
@@ -408,8 +429,8 @@ class Command(BaseCommand):
                 "promotion_type": Task.PromotionType.ORGANIC,
                 "designer": "ava_designer",
                 "created_by": "rhea_planner",
-                "target_date": date(2026, 1, 18),
-                "stage": Task.Stage.BACKLOG,
+                "target_date": date(2026, 3, 18),
+                "stage": Task.Stage.APPROVED,
                 "impressions": 0,
                 "ctr": Decimal("0.00"),
                 "engagement_rate": Decimal("0.00"),
@@ -448,23 +469,44 @@ class Command(BaseCommand):
                 field_file.delete(save=False)
             field_file.save(name, ContentFile(content), save=True)
 
-        self.stdout.write("Preparing seed data reset for API models.")
-        TaskOnStage.objects.all().delete()
-        NegativeRemarkOnTask.objects.all().delete()
-        TaskAttachment.objects.all().delete()
-        Task.objects.all().delete()
-        ClientAttachment.objects.all().delete()
-        ClientMonthlyAmount.objects.all().delete()
-        ClientOwner.objects.all().delete()
-        GroupMember.objects.all().delete()
-        Group.objects.all().delete()
-        ScopeOfWork.objects.all().delete()
-        NegativeRemark.objects.all().delete()
-        TaskStage.objects.all().delete()
-        Client.objects.all().delete()
-        Brand.objects.all().delete()
-        ServiceCategory.objects.all().delete()
-        TypeOfWork.objects.all().delete()
+        def clear_seed_data():
+            seeded_clients = Client.objects.filter(name__in=seeded_client_names)
+            seeded_client_ids = list(seeded_clients.values_list("id", flat=True))
+            seeded_tasks = Task.objects.filter(client_id__in=seeded_client_ids)
+            seeded_task_ids = list(seeded_tasks.values_list("id", flat=True))
+
+            self.stdout.write("Removing seeded dummy data.")
+
+            TaskOnStage.objects.filter(task_id__in=seeded_task_ids).delete()
+            NegativeRemarkOnTask.objects.filter(task_id__in=seeded_task_ids).delete()
+            TaskAttachment.objects.filter(task_id__in=seeded_task_ids).delete()
+            Task.objects.filter(id__in=seeded_task_ids, revision_of__isnull=False).delete()
+            Task.objects.filter(id__in=seeded_task_ids, redo_of__isnull=False).delete()
+            Task.objects.filter(id__in=seeded_task_ids, revision_of__isnull=True, redo_of__isnull=True).delete()
+
+            ClientAttachment.objects.filter(client_id__in=seeded_client_ids).delete()
+            ClientMonthlyAmount.objects.filter(client_id__in=seeded_client_ids).delete()
+            ClientOwner.objects.filter(client_id__in=seeded_client_ids).delete()
+            ScopeOfWork.objects.filter(client_id__in=seeded_client_ids).delete()
+            seeded_clients.delete()
+
+            Brand.objects.filter(name__in=seeded_brand_names).delete()
+            GroupMember.objects.filter(group__name__in=seeded_group_names).delete()
+            Group.objects.filter(name__in=seeded_group_names).delete()
+            NegativeRemark.objects.filter(remark_name__in=seeded_negative_remark_names).delete()
+            TaskStage.objects.filter(name__in=seeded_stage_names).delete()
+            ServiceCategory.objects.filter(name__in=seeded_service_category_names).delete()
+            TypeOfWork.objects.filter(work_type_name__in=seeded_type_of_work_names).delete()
+
+            seeded_users = user_model.objects.filter(email__in=seeded_user_emails)
+            Employee.objects.filter(user__in=seeded_users).delete()
+            seeded_users.delete()
+
+        clear_seed_data()
+
+        if clear_only:
+            self.stdout.write(self.style.SUCCESS("Dummy seeded data removed."))
+            return
 
         users = {}
         for item in user_seed:
@@ -651,7 +693,7 @@ class Command(BaseCommand):
             for index in range(1, bulk_tasks + 1):
                 client_name = client_names[(index - 1) % len(client_names)]
                 work_type_name = work_type_names[(index - 1) % len(work_type_names)]
-                stage_value = list(stage_mapping.keys())[index % len(stage_mapping)]
+                stage_value = Task.Stage.APPROVED
                 task = Task.objects.create(
                     client=client_records[client_name],
                     scope_of_work=next(

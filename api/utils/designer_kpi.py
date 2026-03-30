@@ -15,8 +15,8 @@ def calculate_designer_monthly_kpi(designer_id, year, month) -> float:
     tasks = (
         Task.objects.filter(
             designer_id=designer_id,
-            target_date__year=year,
-            target_date__month=month,
+            created_at__year=year,
+            created_at__month=month,
             stage__in=ALLOWED_KPI_STAGES,
         )
         .select_related(
@@ -97,11 +97,11 @@ def _calculate_group_points(original_task, related_tasks) -> Decimal:
 
 
 def _resolve_group_week(original_task, related_tasks) -> int:
-    dated_tasks = [task for task in related_tasks if task.target_date]
+    dated_tasks = [task for task in related_tasks if task.created_at]
     if original_task in dated_tasks:
-        reference_date = original_task.target_date
+        reference_date = original_task.created_at
     elif dated_tasks:
-        reference_date = min(task.target_date for task in dated_tasks)
+        reference_date = min(task.created_at for task in dated_tasks)
     else:
         return 1
 

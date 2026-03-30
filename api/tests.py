@@ -1024,6 +1024,12 @@ class TaskAPITests(APITestCase):
             stage=Task.Stage.BACKLOG,
         )
 
+        march_created_ids = [original.id, revision.id, redo.id]
+        Task.objects.filter(id__in=march_created_ids).update(created_at="2026-03-15T10:00:00Z")
+        Task.objects.filter(task_name="Second Task").update(created_at="2026-03-18T10:00:00Z")
+        Task.objects.filter(task_name="April Task").update(created_at="2026-04-02T10:00:00Z")
+        Task.objects.filter(task_name="Backlog Task").update(created_at="2026-03-24T10:00:00Z")
+
         low_quality = NegativeRemark.objects.create(remark_name="Low quality", point=Decimal("0.50"))
         missed_brief = NegativeRemark.objects.create(remark_name="Missed brief", point=Decimal("1.00"))
         typo = NegativeRemark.objects.create(remark_name="Typo", point=Decimal("0.25"))
@@ -1048,7 +1054,7 @@ class TaskAPITests(APITestCase):
 
     def test_designer_kpi_endpoint_allows_designer_to_query_self_without_designer_id(self):
         self.client.force_authenticate(self.designer)
-        Task.objects.create(
+        task = Task.objects.create(
             client=self.client_obj,
             scope_of_work=self.scope_of_work,
             task_name="Self KPI Task",
@@ -1058,6 +1064,7 @@ class TaskAPITests(APITestCase):
             slides=3,
             stage=Task.Stage.COMPLETE,
         )
+        Task.objects.filter(id=task.id).update(created_at="2026-03-10T10:00:00Z")
 
         response = self.client.get(
             reverse("task-designer-kpi"),
@@ -1069,6 +1076,28 @@ class TaskAPITests(APITestCase):
         self.assertEqual(response.data["month"], "2026-03")
         self.assertAlmostEqual(response.data["total_kpi_score"], 15.0)
         self.assertAlmostEqual(response.data["weekly_scores"]["2"], 15.0)
+
+    def test_designer_kpi_endpoint_uses_created_at_month_not_target_date_month(self):
+        task = Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Created In March",
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2026-04-05",
+            slides=4,
+            stage=Task.Stage.COMPLETE,
+        )
+        Task.objects.filter(id=task.id).update(created_at="2026-03-08T10:00:00Z")
+
+        response = self.client.get(
+            reverse("task-designer-kpi"),
+            {"designer_id": self.designer.id, "month": "2026-03"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertAlmostEqual(response.data["total_kpi_score"], 20.0)
+        self.assertAlmostEqual(response.data["weekly_scores"]["2"], 20.0)
 
     def test_task_excellence_accepts_integers_and_floats_including_negative_values(self):
         cases = [
