@@ -508,6 +508,7 @@ class TaskSerializer(serializers.ModelSerializer):
             "designer_name",
             "type_of_work",
             "type_of_work_name",
+            "platform",
             "service_category_name",
             "created_by",
             "created_by_name",
@@ -604,49 +605,64 @@ class TaskSerializer(serializers.ModelSerializer):
         stage_change_requested = "stage" in attrs or any(key in self.initial_data for key in legacy_completion_keys)
 
         if self.instance is not None and stage_change_requested and user and user.is_authenticated and not user.is_superuser:
-            workflow_order = [
-                Task.Stage.BACKLOG,
-                Task.Stage.ON_GOING,
-                Task.Stage.COMPLETE,
-                Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
-                Task.Stage.APPROVED,
-            ]
             next_stage = effective_stage
 
             if current_stage != next_stage:
-                allowed_stage_scopes = {
-                    User.Role.DESIGNER: {
-                        Task.Stage.BACKLOG,
-                        Task.Stage.ON_GOING,
-                        Task.Stage.COMPLETE,
-                    },
-                    User.Role.ART_DIRECTOR: {
-                        Task.Stage.COMPLETE,
-                        Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
-                    },
-                    User.Role.ACCOUNT_PLANNER: {
-                        Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
-                        Task.Stage.APPROVED,
-                    },
+                assigned_execution_stages = {
+                    Task.Stage.BACKLOG,
+                    Task.Stage.ON_GOING,
+                    Task.Stage.COMPLETE,
                 }
+                assigned_art_director_stages = {
+                    Task.Stage.BACKLOG,
+                    Task.Stage.ON_GOING,
+                    Task.Stage.COMPLETE,
+                    Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+                }
+                assigned_user = attrs.get("designer", getattr(self.instance, "designer", None))
+                assigned_user_id = getattr(assigned_user, "id", None)
+                is_assigned_user = assigned_user_id is not None and assigned_user_id == user.id
+                allow_assigned_execution_transition = False
 
-                allowed_stages = allowed_stage_scopes.get(user.role)
-                if allowed_stages is not None:
-                    if current_stage not in allowed_stages or next_stage not in allowed_stages:
-                        raise serializers.ValidationError(
-                            {
-                                "stage": "You can only move tasks within the stages allowed for your role."
-                            }
-                        )
+                if (
+                    is_assigned_user
+                    and user.role == User.Role.ART_DIRECTOR
+                    and current_stage in assigned_art_director_stages
+                    and next_stage in assigned_art_director_stages
+                ):
+                    allow_assigned_execution_transition = True
+                elif (
+                    is_assigned_user
+                    and current_stage in assigned_execution_stages
+                    and next_stage in assigned_execution_stages
+                ):
+                    allow_assigned_execution_transition = True
 
-                    current_index = workflow_order.index(current_stage)
-                    next_index = workflow_order.index(next_stage)
-                    if next_index > current_index and (next_index - current_index) != 1:
-                        raise serializers.ValidationError(
-                            {
-                                "stage": "You can only move tasks one step forward within your workflow."
-                            }
-                        )
+                if not allow_assigned_execution_transition:
+                    allowed_stage_scopes = {
+                        User.Role.DESIGNER: {
+                            Task.Stage.BACKLOG,
+                            Task.Stage.ON_GOING,
+                            Task.Stage.COMPLETE,
+                        },
+                        User.Role.ART_DIRECTOR: {
+                            Task.Stage.COMPLETE,
+                            Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+                        },
+                        User.Role.ACCOUNT_PLANNER: {
+                            Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+                            Task.Stage.APPROVED,
+                        },
+                    }
+
+                    allowed_stages = allowed_stage_scopes.get(user.role)
+                    if allowed_stages is not None:
+                        if current_stage not in allowed_stages or next_stage not in allowed_stages:
+                            raise serializers.ValidationError(
+                                {
+                                    "stage": "You can only move tasks within the stages allowed for your role."
+                                }
+                            )
 
         if revision_of and not effective_have_major_changes and not effective_have_minor_changes:
             raise serializers.ValidationError(
@@ -748,8 +764,14 @@ class TaskSerializer(serializers.ModelSerializer):
                         }
                     )
 
-        attrs["stage"] = effective_stage
-        return attrs
+        assigned_designer = attrs.get("designer", getattr(self.instance, "designer", None))
+        assigned_designer_id = getattr(assigned_designer, "id", None)
+        designer_assignment_requested = "designer" in attrs or "designer" in self.initial_data
+
+        if designer_assignment_requested and assigned_designer_id and effective_stage == Task.Stage.BACKLOG:
+            effective_stage = Task.Stage.ON_GOING
+
+        return self._finalize_validated_attrs(attrs, effective_stage)
 
     def get_isRevision(self, obj):
         return bool(obj.revision_of_id)
@@ -806,6 +828,10 @@ class TaskSerializer(serializers.ModelSerializer):
         if "is_marked_completed_by_account_planner" in self.initial_data:
             return Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL
         return stage
+
+    def _finalize_validated_attrs(self, attrs, effective_stage):
+        attrs["stage"] = effective_stage
+        return attrs
 
 
 class EmailAuthTokenSerializer(serializers.Serializer):

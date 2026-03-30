@@ -314,14 +314,14 @@ class Task(models.Model):
         LOW = "low", "Low"
 
     class Stage(models.TextChoices):
-        BACKLOG = "backlog", "Backlog"
+        BACKLOG = "backlog", "Initiate"
         ON_GOING = "on_going", "Ongoing"
         COMPLETE = "complete", "Complete"
         APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL = (
             "approved_by_art_director_waiting_for_approval",
-            "Approved By Art Director/ Waiting for approval",
+            "Approved By Art Director",
         )
-        APPROVED = "approved", "Approved"
+        APPROVED = "approved", "Approved by Client"
 
     class RevisionType(models.TextChoices):
         SMALL = "small", "Small"
@@ -331,6 +331,18 @@ class Task(models.Model):
     class PromotionType(models.TextChoices):
         ORGANIC = "organic", "Organic"
         SPONSORED = "sponsored", "Sponsored"
+
+    class Platform(models.TextChoices):
+        INSTAGRAM = "instagram", "Instagram"
+        FACEBOOK = "facebook", "Facebook"
+        LINKEDIN = "linkedin", "LinkedIn"
+        X = "x", "X"
+        YOUTUBE = "youtube", "YouTube"
+        TIKTOK = "tiktok", "TikTok"
+        PINTEREST = "pinterest", "Pinterest"
+        SNAPCHAT = "snapchat", "Snapchat"
+        THREADS = "threads", "Threads"
+        WHATSAPP = "whatsapp", "WhatsApp"
 
     client = models.ForeignKey(
         Client,
@@ -402,6 +414,12 @@ class Task(models.Model):
         blank=True,
         related_name="tasks",
     )
+    platform = models.CharField(
+        max_length=32,
+        choices=Platform.choices,
+        blank=True,
+        default="",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -442,6 +460,7 @@ class Task(models.Model):
             models.Index(fields=["stage"]),
             models.Index(fields=["designer"]),
             models.Index(fields=["type_of_work"]),
+            models.Index(fields=["platform"]),
             models.Index(fields=["scope_of_work"]),
             models.Index(fields=["target_date"]),
             models.Index(fields=["revision_of"]),

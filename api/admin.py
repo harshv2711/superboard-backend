@@ -92,6 +92,7 @@ class TaskResource(resources.ModelResource):
             "designer",
             "created_by",
             "type_of_work",
+            "platform",
             "scope_of_work",
             "target_date",
             "slides",
@@ -281,6 +282,7 @@ class TaskAdmin(ModelAdmin, ImportExportModelAdmin):
         "designer",
         "created_by",
         "type_of_work",
+        "platform",
         "target_date",
         "slides",
         "impressions",
@@ -292,7 +294,7 @@ class TaskAdmin(ModelAdmin, ImportExportModelAdmin):
         "revision_of",
         "redo_of",
     )
-    list_filter = ("client", "scope_of_work", "priority", "stage", "revision_type", "designer", "created_by", "target_date")
+    list_filter = ("client", "scope_of_work", "priority", "stage", "revision_type", "designer", "created_by", "platform", "target_date")
     search_fields = ("id", "task_name", "instructions", "client__name", "scope_of_work__deliverable_name", "designer__email", "created_by__email")
     ordering = ("-target_date", "-created_at")
     autocomplete_fields = ("client", "scope_of_work", "designer", "created_by", "type_of_work", "revision_of", "redo_of")
@@ -300,7 +302,7 @@ class TaskAdmin(ModelAdmin, ImportExportModelAdmin):
     readonly_fields = ("id", "created_at", "updated_at")
 
     fieldsets = (
-        ("Core", {"fields": ("id", "client", "scope_of_work", "priority", "stage", "designer", "created_by", "type_of_work")}),
+        ("Core", {"fields": ("id", "client", "scope_of_work", "priority", "stage", "designer", "created_by", "type_of_work", "platform")}),
         ("Task Details", {"fields": ("task_name", "instructions", "InstructionsByArtDirector", "revision_type")}),
         ("Timeline", {"fields": ("target_date", "slides", "impressions", "ctr", "engagement_rate", "promotion_type")}),
         ("Revision", {"fields": ("revision_of", "revision_no", "revision_count")}),

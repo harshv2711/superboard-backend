@@ -1179,6 +1179,35 @@ class TaskAPITests(APITestCase):
         task.refresh_from_db()
         self.assertEqual(task.instructions, "Updated brief")
 
+    def test_assigning_designer_moves_task_from_initiate_to_ongoing(self):
+        art_director = User.objects.create_user(
+            email="art-assign@test.com",
+            password="password123",
+            role=User.Role.ART_DIRECTOR,
+        )
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Assign Me",
+            instructions="Original brief",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.BACKLOG,
+            created_by=self.planner,
+        )
+        self.client.force_authenticate(art_director)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "designer": self.designer.id,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.designer_id, self.designer.id)
+        self.assertEqual(task.stage, Task.Stage.ON_GOING)
+
     def test_art_director_can_edit_own_created_task_but_not_planner_completion_flag(self):
         art_director = User.objects.create_user(
             email="art-own@test.com",
@@ -1263,6 +1292,172 @@ class TaskAPITests(APITestCase):
         derived_state = Task.completion_state_for_stage(task.stage)
         self.assertTrue(derived_state["is_marked_completed_by_designer"])
         self.assertFalse(derived_state["is_marked_completed_by_art_director"])
+
+    def test_assigned_art_director_can_move_task_within_execution_stages(self):
+        art_director = User.objects.create_user(
+            email="assigned-art@test.com",
+            password="password123",
+            role=User.Role.ART_DIRECTOR,
+        )
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Assigned Art Director Execution Task",
+            instructions="Original brief",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.BACKLOG,
+            designer=art_director,
+            created_by=self.planner,
+        )
+        self.client.force_authenticate(art_director)
+
+        forward_response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.ON_GOING,
+            },
+            format="json",
+        )
+
+        self.assertEqual(forward_response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.ON_GOING)
+
+        complete_response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.COMPLETE,
+            },
+            format="json",
+        )
+
+        self.assertEqual(complete_response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.COMPLETE)
+
+        backward_response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.BACKLOG,
+            },
+            format="json",
+        )
+
+        self.assertEqual(backward_response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.BACKLOG)
+
+    def test_assigned_art_director_can_skip_directly_to_complete(self):
+        art_director = User.objects.create_user(
+            email="assigned-art-skip@test.com",
+            password="password123",
+            role=User.Role.ART_DIRECTOR,
+        )
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Assigned Art Director Skip Task",
+            instructions="Original brief",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.BACKLOG,
+            designer=art_director,
+            created_by=self.planner,
+        )
+        self.client.force_authenticate(art_director)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.COMPLETE,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.COMPLETE)
+
+    def test_assigned_art_director_can_move_directly_to_art_director_approval_stage(self):
+        art_director = User.objects.create_user(
+            email="assigned-art-approval@test.com",
+            password="password123",
+            role=User.Role.ART_DIRECTOR,
+        )
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Assigned Art Director Approval Task",
+            instructions="Original brief",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.BACKLOG,
+            designer=art_director,
+            created_by=self.planner,
+        )
+        self.client.force_authenticate(art_director)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL)
+
+    def test_assigned_art_director_still_cannot_move_task_to_approved(self):
+        art_director = User.objects.create_user(
+            email="assigned-art-final@test.com",
+            password="password123",
+            role=User.Role.ART_DIRECTOR,
+        )
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Assigned Art Director Final Approval Task",
+            instructions="Original brief",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.BACKLOG,
+            designer=art_director,
+            created_by=self.planner,
+        )
+        self.client.force_authenticate(art_director)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.APPROVED,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("stage", response.data)
+
+    def test_unassigned_art_director_cannot_move_task_into_execution_stages(self):
+        art_director = User.objects.create_user(
+            email="unassigned-art@test.com",
+            password="password123",
+            role=User.Role.ART_DIRECTOR,
+        )
+        task = Task.objects.create(
+            client=self.client_obj,
+            task_name="Unassigned Art Director Execution Task",
+            instructions="Original brief",
+            priority=Task.Priority.MEDIUM,
+            stage=Task.Stage.BACKLOG,
+            created_by=self.planner,
+        )
+        self.client.force_authenticate(art_director)
+
+        response = self.client.patch(
+            reverse("task-detail", args=[task.id]),
+            {
+                "stage": Task.Stage.ON_GOING,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("stage", response.data)
 
     def test_create_redo_task(self):
         original = Task.objects.create(
@@ -1415,7 +1610,7 @@ class TaskAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("stage", response.data)
 
-    def test_designer_cannot_skip_forward_from_backlog_to_complete(self):
+    def test_designer_can_move_directly_from_backlog_to_complete(self):
         task = Task.objects.create(
             client=self.client_obj,
             task_name="Designer Forward Skip Task",
@@ -1434,8 +1629,13 @@ class TaskAPITests(APITestCase):
             format="json",
         )
 
-        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("stage", response.data)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        task.refresh_from_db()
+        self.assertEqual(task.stage, Task.Stage.COMPLETE)
+        derived_state = Task.completion_state_for_stage(task.stage)
+        self.assertTrue(derived_state["is_marked_completed_by_designer"])
+        self.assertFalse(derived_state["is_marked_completed_by_art_director"])
+        self.assertFalse(derived_state["is_marked_completed_by_account_planner"])
 
     def test_account_planner_cannot_update_art_director_or_designer_completion_flags(self):
         task = Task.objects.create(
@@ -1523,13 +1723,13 @@ class TaskAPITests(APITestCase):
             scope_of_work=self.scope_of_work,
             task_name="Planner Restricted Workflow Task",
             priority=Task.Priority.MEDIUM,
-            stage=Task.Stage.APPROVED_BY_ART_DIRECTOR_WAITING_FOR_APPROVAL,
+            stage=Task.Stage.BACKLOG,
         )
 
         response = self.client.patch(
             reverse("task-detail", args=[task.id]),
             {
-                "stage": Task.Stage.COMPLETE,
+                "stage": Task.Stage.APPROVED,
             },
             format="json",
         )
