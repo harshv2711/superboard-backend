@@ -50,7 +50,7 @@ from .serializers import (
     TaskStageSerializer,
     TypeOfWorkSerializer,
 )
-from .utils.designer_kpi import calculate_designer_monthly_kpi
+from .utils.designer_kpi import calculate_designer_monthly_kpi, get_designer_kpi_available_years
 
 
 class AdditionalPointsViewSet(viewsets.ModelViewSet):
@@ -413,6 +413,21 @@ class TaskViewSet(viewsets.ModelViewSet):
         }
         serializer = DesignerKpiSummarySerializer(payload)
         return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="designer-kpi-years")
+    def designer_kpi_years(self, request):
+        designer_id_param = request.query_params.get("designer_id")
+        if is_designer(request.user):
+            designer_id = request.user.id
+        elif designer_id_param:
+            try:
+                designer_id = int(designer_id_param)
+            except (TypeError, ValueError):
+                raise ValidationError({"designer_id": "Designer id must be a valid integer."})
+        else:
+            designer_id = None
+
+        return Response({"years": get_designer_kpi_available_years(designer_id=designer_id)})
 
     @action(detail=True, methods=["get"])
     def revisions(self, request, pk=None):

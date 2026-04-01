@@ -75,6 +75,34 @@ def calculate_designer_monthly_kpi(designer_id, year, month) -> float:
     }
 
 
+def get_designer_kpi_available_years(designer_id=None):
+    task_filters = {"stage__in": ALLOWED_KPI_STAGES}
+    additional_points_filters = {}
+
+    if designer_id is not None:
+        task_filters["designer_id"] = designer_id
+        additional_points_filters["user_id"] = designer_id
+
+    task_years = {
+        year
+        for year in Task.objects.filter(**task_filters)
+        .exclude(created_at__year__isnull=True)
+        .values_list("created_at__year", flat=True)
+        .distinct()
+        if year is not None
+    }
+    additional_points_years = {
+        year
+        for year in AdditionalPoints.objects.filter(**additional_points_filters)
+        .exclude(date__year__isnull=True)
+        .values_list("date__year", flat=True)
+        .distinct()
+        if year is not None
+    }
+
+    return sorted(task_years | additional_points_years, reverse=True)
+
+
 def _resolve_original_task(task):
     if task.revision_of_id:
         return task.revision_of

@@ -1099,6 +1099,50 @@ class TaskAPITests(APITestCase):
         self.assertAlmostEqual(response.data["total_kpi_score"], 20.0)
         self.assertAlmostEqual(response.data["weekly_scores"]["2"], 20.0)
 
+    def test_designer_kpi_years_endpoint_returns_only_years_with_kpi_data(self):
+        task_2024 = Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Task 2024",
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2024-06-05",
+            slides=2,
+            stage=Task.Stage.COMPLETE,
+        )
+        task_2026 = Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Task 2026",
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2026-03-05",
+            slides=2,
+            stage=Task.Stage.APPROVED,
+        )
+        Task.objects.filter(id=task_2024.id).update(created_at="2024-06-05T10:00:00Z")
+        Task.objects.filter(id=task_2026.id).update(created_at="2026-03-05T10:00:00Z")
+        AdditionalPoints.objects.create(
+            user=self.designer,
+            points=Decimal("5.0"),
+            date="2025-02-10",
+        )
+        Task.objects.create(
+            client=self.client_obj,
+            scope_of_work=self.scope_of_work,
+            task_name="Ignored backlog",
+            designer=self.designer,
+            type_of_work=self.type_of_work,
+            target_date="2027-01-05",
+            slides=2,
+            stage=Task.Stage.BACKLOG,
+        )
+
+        response = self.client.get(reverse("task-designer-kpi-years"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["years"], [2026, 2025, 2024])
+
     def test_task_excellence_accepts_integers_and_floats_including_negative_values(self):
         cases = [
             (5, "5.0000"),

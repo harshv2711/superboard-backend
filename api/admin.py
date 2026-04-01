@@ -12,6 +12,11 @@ from .models import AdditionalPoints, Brand, Client, ClientAttachment, ClientMon
 User = get_user_model()
 
 
+class BaseImportExportAdmin(ImportExportModelAdmin, ModelAdmin):
+    import_form_class = ImportForm
+    export_form_class = ExportForm
+
+
 class TaskAdminForm(forms.ModelForm):
     class Meta:
         model = Task
@@ -120,10 +125,8 @@ class TaskResource(resources.ModelResource):
 
 
 @admin.register(Brand)
-class BrandAdmin(ModelAdmin, ImportExportModelAdmin):
+class BrandAdmin(BaseImportExportAdmin):
     resource_class = BrandResource
-    import_form_class = ImportForm
-    export_form_class = ExportForm
 
     list_display = ("name",)
     search_fields = ("name",)
@@ -131,7 +134,7 @@ class BrandAdmin(ModelAdmin, ImportExportModelAdmin):
 
 
 @admin.register(AdditionalPoints)
-class AdditionalPointsAdmin(ModelAdmin):
+class AdditionalPointsAdmin(BaseImportExportAdmin):
     list_display = ("id", "user", "points", "date", "created_at")
     search_fields = ("user__email", "user__first_name", "user__last_name")
     list_filter = ("date", "created_at")
@@ -140,14 +143,14 @@ class AdditionalPointsAdmin(ModelAdmin):
 
 
 @admin.register(Group)
-class GroupAdmin(ModelAdmin):
+class GroupAdmin(BaseImportExportAdmin):
     list_display = ("id", "name", "created_at")
     search_fields = ("name",)
     ordering = ("name",)
 
 
 @admin.register(GroupMember)
-class GroupMemberAdmin(ModelAdmin):
+class GroupMemberAdmin(BaseImportExportAdmin):
     list_display = ("id", "group", "user", "created_at")
     search_fields = ("group__name", "user__email", "user__first_name", "user__last_name")
     list_filter = ("group", "user")
@@ -156,28 +159,28 @@ class GroupMemberAdmin(ModelAdmin):
 
 
 @admin.register(TypeOfWork)
-class TypeOfWorkAdmin(ModelAdmin):
+class TypeOfWorkAdmin(BaseImportExportAdmin):
     list_display = ("id", "work_type_name", "point", "redo_point", "major_changes_point", "minor_changes_point")
     search_fields = ("work_type_name",)
     ordering = ("work_type_name",)
 
 
 @admin.register(ServiceCategory)
-class ServiceCategoryAdmin(ModelAdmin):
+class ServiceCategoryAdmin(BaseImportExportAdmin):
     list_display = ("id", "name", "description")
     search_fields = ("name", "description")
     ordering = ("name",)
 
 
 @admin.register(NegativeRemark)
-class NegativeRemarkAdmin(ModelAdmin):
+class NegativeRemarkAdmin(BaseImportExportAdmin):
     list_display = ("id", "remark_name", "point", "created_at")
     search_fields = ("remark_name", "description")
     ordering = ("-created_at", "-id")
 
 
 @admin.register(NegativeRemarkOnTask)
-class NegativeRemarkOnTaskAdmin(ModelAdmin):
+class NegativeRemarkOnTaskAdmin(BaseImportExportAdmin):
     list_display = ("id", "task", "negative_remark", "created_at")
     search_fields = ("task__task_name", "task__client__name", "negative_remark__remark_name")
     list_filter = ("task__client", "negative_remark")
@@ -186,7 +189,7 @@ class NegativeRemarkOnTaskAdmin(ModelAdmin):
 
 
 @admin.register(TaskAttachment)
-class TaskAttachmentAdmin(ModelAdmin):
+class TaskAttachmentAdmin(BaseImportExportAdmin):
     list_display = ("id", "task", "file", "created_at")
     search_fields = ("task__task_name", "task__client__name", "file")
     list_filter = ("task__client", "created_at")
@@ -195,14 +198,14 @@ class TaskAttachmentAdmin(ModelAdmin):
 
 
 @admin.register(TaskStage)
-class TaskStageAdmin(ModelAdmin):
+class TaskStageAdmin(BaseImportExportAdmin):
     list_display = ("id", "name", "created_at")
     search_fields = ("name",)
     ordering = ("name",)
 
 
 @admin.register(TaskOnStage)
-class TaskOnStageAdmin(ModelAdmin):
+class TaskOnStageAdmin(BaseImportExportAdmin):
     list_display = ("id", "task_stage", "task", "created_at")
     search_fields = ("task_stage__name", "task__task_name", "task__client__name")
     list_filter = ("task_stage", "created_at")
@@ -211,7 +214,7 @@ class TaskOnStageAdmin(ModelAdmin):
 
 
 @admin.register(Client)
-class ClientAdmin(ModelAdmin):
+class ClientAdmin(BaseImportExportAdmin):
     list_display = (
         "id",
         "name",
@@ -226,7 +229,7 @@ class ClientAdmin(ModelAdmin):
 
 
 @admin.register(ClientAttachment)
-class ClientAttachmentAdmin(ModelAdmin):
+class ClientAttachmentAdmin(BaseImportExportAdmin):
     list_display = ("id", "client", "file", "created_at")
     search_fields = ("client__name", "file")
     list_filter = ("client", "created_at")
@@ -235,7 +238,7 @@ class ClientAttachmentAdmin(ModelAdmin):
 
 
 @admin.register(ClientMonthlyAmount)
-class ClientMonthlyAmountAdmin(ModelAdmin):
+class ClientMonthlyAmountAdmin(BaseImportExportAdmin):
     list_display = ("id", "client", "date", "amt", "created_at")
     search_fields = ("client__name",)
     list_filter = ("client", "date")
@@ -244,7 +247,7 @@ class ClientMonthlyAmountAdmin(ModelAdmin):
 
 
 @admin.register(ClientOwner)
-class ClientOwnerAdmin(ModelAdmin):
+class ClientOwnerAdmin(BaseImportExportAdmin):
     list_display = ("id", "user", "client", "created_at")
     search_fields = ("user__email", "client__name")
     list_filter = ("user", "client")
@@ -253,7 +256,7 @@ class ClientOwnerAdmin(ModelAdmin):
 
 
 @admin.register(ScopeOfWork)
-class ScopeOfWorkAdmin(ModelAdmin):
+class ScopeOfWorkAdmin(BaseImportExportAdmin):
     list_display = (
         "id",
         "client",
@@ -273,11 +276,9 @@ class ScopeOfWorkAdmin(ModelAdmin):
 
 
 @admin.register(Task)
-class TaskAdmin(ModelAdmin, ImportExportModelAdmin):
+class TaskAdmin(BaseImportExportAdmin):
     form = TaskAdminForm
     resource_class = TaskResource
-    import_form_class = ImportForm
-    export_form_class = ExportForm
 
     list_display = (
         "id",

@@ -2,14 +2,21 @@ from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.contrib.auth.admin import GroupAdmin as BaseGroupAdmin
 from django.contrib.auth.models import Group
+from import_export.admin import ImportExportModelAdmin
 from unfold.admin import ModelAdmin
+from unfold.contrib.import_export.forms import ExportForm, ImportForm
 from unfold.forms import AdminPasswordChangeForm, UserChangeForm, UserCreationForm
 
 from .models import CustomUser, Employee
 
 
+class BaseImportExportAdmin(ImportExportModelAdmin, ModelAdmin):
+    import_form_class = ImportForm
+    export_form_class = ExportForm
+
+
 @admin.register(CustomUser)
-class CustomUserAdmin(BaseUserAdmin, ModelAdmin):
+class CustomUserAdmin(BaseUserAdmin, BaseImportExportAdmin):
     model = CustomUser
     form = UserChangeForm
     add_form = UserCreationForm
@@ -41,12 +48,12 @@ admin.site.unregister(Group)
 
 
 @admin.register(Group)
-class GroupAdmin(BaseGroupAdmin, ModelAdmin):
+class GroupAdmin(BaseGroupAdmin, BaseImportExportAdmin):
     pass
 
 
 @admin.register(Employee)
-class EmployeeAdmin(ModelAdmin):
+class EmployeeAdmin(BaseImportExportAdmin):
     list_display = ("id", "user", "designation", "salary", "created_at")
     list_display_links = ("id", "user")
     search_fields = ("user__email", "designation")
