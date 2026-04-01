@@ -14,6 +14,7 @@ from .models import Brand, Client, ClientAttachment, ClientMonthlyAmount, Client
 from .permissions import (
     CanWriteTaskByRole,
     IsAuthenticatedAndCanManageNegativeRemarks,
+    IsAuthenticatedAndSuperuserOnly,
     IsClientOwnerOrReadOnly,
     is_account_planner,
     is_art_director,
@@ -202,7 +203,7 @@ class ClientAttachmentViewSet(viewsets.ModelViewSet):
 class ClientMonthlyAmountViewSet(viewsets.ModelViewSet):
     queryset = ClientMonthlyAmount.objects.all().select_related("client")
     serializer_class = ClientMonthlyAmountSerializer
-    permission_classes = [permissions.IsAuthenticated, IsClientOwnerOrReadOnly]
+    permission_classes = [IsAuthenticatedAndSuperuserOnly]
     filterset_fields = ["client", "date"]
     search_fields = ["client__name"]
     ordering_fields = ["id", "client", "date", "amt", "created_at", "updated_at"]

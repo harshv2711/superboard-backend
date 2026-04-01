@@ -4,6 +4,14 @@ from .models import Client
 from users.models import CustomUser
 
 
+def is_exact_superuser(user):
+    return bool(
+        user
+        and user.is_authenticated
+        and (user.is_superuser or user.role == CustomUser.Role.SUPERUSER)
+    )
+
+
 def is_privileged_user(user):
     if not user or not user.is_authenticated:
         return False
@@ -76,3 +84,11 @@ class IsAuthenticatedAndCanManageNegativeRemarks(BasePermission):
         if request.method in SAFE_METHODS:
             return True
         return is_privileged_user(request.user) or is_art_director(request.user)
+
+
+class IsAuthenticatedAndSuperuserOnly(BasePermission):
+    def has_permission(self, request, view):
+        return is_exact_superuser(request.user)
+
+    def has_object_permission(self, request, view, obj):
+        return is_exact_superuser(request.user)
