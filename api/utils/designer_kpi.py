@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django.db.models import Prefetch
 
-from api.models import NegativeRemarkOnTask, Task
+from api.models import AdditionalPoints, NegativeRemarkOnTask, Task
 
 ALLOWED_KPI_STAGES = {
     Task.Stage.COMPLETE,
@@ -56,6 +56,16 @@ def calculate_designer_monthly_kpi(designer_id, year, month) -> float:
         total += group_points
         weekly_scores[str(_resolve_group_week(group["original_task"], related_tasks))] += group_points
 
+    additional_points = AdditionalPoints.objects.filter(
+        user_id=designer_id,
+        date__year=year,
+        date__month=month,
+    ).order_by("date", "id")
+    for item in additional_points:
+        points = _to_decimal(item.points)
+        total += points
+        weekly_scores[str(_resolve_date_week(item.date.day))] += points
+
     return {
         "total_kpi_score": float(total),
         "weekly_scores": {
@@ -82,7 +92,7 @@ def _calculate_group_points(original_task, related_tasks) -> Decimal:
     revision_points = Decimal("0")
     redo_points = Decimal("0")
     excellence_points = Decimal("0")
-    negative_points = Decimal("0")
+    remark_points = Decimal("0")
 
     for task in related_tasks:
         if task.revision_of_id:
@@ -91,9 +101,15 @@ def _calculate_group_points(original_task, related_tasks) -> Decimal:
             redo_points += _to_decimal(getattr(task.type_of_work, "redo_point", 0))
 
         excellence_points += _to_decimal(task.excellence)
-        negative_points += _calculate_negative_points(task)
+        remark_points += _calculate_negative_points(task)
 
-    return slide_points + revision_points + redo_points + excellence_points - negative_points
+    return slide_points + revision_points + redo_points + excellence_points + remark_points
+
+
+def _resolve_date_week(day: int) -> int:
+    if day <= 0:
+        return 1
+    return min(5, ((day - 1) // 7) + 1)
 
 
 def _resolve_group_week(original_task, related_tasks) -> int:

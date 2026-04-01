@@ -10,7 +10,7 @@ from rest_framework.serializers import ValidationError
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
-from .models import Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TaskOnStage, TaskStage, TypeOfWork
+from .models import AdditionalPoints, Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TaskOnStage, TaskStage, TypeOfWork
 from .permissions import (
     CanWriteTaskByRole,
     IsAuthenticatedAndCanManageNegativeRemarks,
@@ -25,6 +25,7 @@ from .permissions import (
     user_can_manage_client,
 )
 from .serializers import (
+    AdditionalPointsSerializer,
     BrandSerializer,
     ChangePasswordSerializer,
     ClientSerializer,
@@ -50,6 +51,16 @@ from .serializers import (
     TypeOfWorkSerializer,
 )
 from .utils.designer_kpi import calculate_designer_monthly_kpi
+
+
+class AdditionalPointsViewSet(viewsets.ModelViewSet):
+    queryset = AdditionalPoints.objects.all().select_related("user")
+    serializer_class = AdditionalPointsSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    filterset_fields = ["user", "date"]
+    search_fields = ["user__email", "user__first_name", "user__last_name"]
+    ordering_fields = ["id", "user", "points", "date", "created_at", "updated_at"]
+    ordering = ["-date", "-id"]
 
 
 class BrandViewSet(viewsets.ModelViewSet):

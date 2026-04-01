@@ -1,6 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
+    AdditionalPointsViewSet,
     BrandViewSet,
     ChangePasswordView,
     ClientViewSet,
@@ -27,6 +28,7 @@ from .views import (
 )
 
 router = DefaultRouter()
+router.register(r"additional-points", AdditionalPointsViewSet, basename="additional-point")
 router.register(r"brands", BrandViewSet, basename="brand")
 router.register(r"groups", GroupViewSet, basename="group")
 router.register(r"group-members", GroupMemberViewSet, basename="group-member")

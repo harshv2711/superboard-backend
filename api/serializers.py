@@ -8,6 +8,7 @@ from django.contrib.auth.tokens import default_token_generator
 import re
 from rest_framework import serializers
 from .models import (
+    AdditionalPoints,
     Brand,
     Client,
     ClientAttachment,
@@ -27,6 +28,29 @@ from .models import (
 )
 
 User = get_user_model()
+
+
+class AdditionalPointsSerializer(serializers.ModelSerializer):
+    user_email = serializers.EmailField(source="user.email", read_only=True)
+    user_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AdditionalPoints
+        fields = [
+            "id",
+            "user",
+            "user_email",
+            "user_name",
+            "points",
+            "date",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "user_email", "user_name", "created_at", "updated_at"]
+
+    def get_user_name(self, obj):
+        full_name = f"{obj.user.first_name or ''} {obj.user.last_name or ''}".strip()
+        return full_name or obj.user.email
 
 
 class ClientSerializer(serializers.ModelSerializer):

@@ -112,6 +112,28 @@ class ClientMonthlyAmount(models.Model):
         return f"{self.client.name} | {self.date} | {self.amt}"
 
 
+class AdditionalPoints(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="additional_points",
+    )
+    points = models.DecimalField(max_digits=12, decimal_places=4)
+    date = models.DateField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-date", "-id"]
+        indexes = [
+            models.Index(fields=["user"]),
+            models.Index(fields=["date"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user.email} | {self.date} | {self.points}"
+
+
 class Group(models.Model):
     name = models.CharField(max_length=255, unique=True)
     created_at = models.DateTimeField(auto_now_add=True)

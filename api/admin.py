@@ -7,7 +7,7 @@ from import_export.widgets import DateWidget, ForeignKeyWidget
 from unfold.admin import ModelAdmin
 from unfold.contrib.import_export.forms import ExportForm, ImportForm
 
-from .models import Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TaskOnStage, TaskStage, TypeOfWork
+from .models import AdditionalPoints, Brand, Client, ClientAttachment, ClientMonthlyAmount, ClientOwner, Group, GroupMember, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TaskAttachment, TaskOnStage, TaskStage, TypeOfWork
 
 User = get_user_model()
 
@@ -128,6 +128,15 @@ class BrandAdmin(ModelAdmin, ImportExportModelAdmin):
     list_display = ("name",)
     search_fields = ("name",)
     ordering = ("name",)
+
+
+@admin.register(AdditionalPoints)
+class AdditionalPointsAdmin(ModelAdmin):
+    list_display = ("id", "user", "points", "date", "created_at")
+    search_fields = ("user__email", "user__first_name", "user__last_name")
+    list_filter = ("date", "created_at")
+    ordering = ("-date", "-id")
+    autocomplete_fields = ("user",)
 
 
 @admin.register(Group)
