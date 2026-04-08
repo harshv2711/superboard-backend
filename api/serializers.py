@@ -2,6 +2,7 @@ from django.contrib.auth import authenticate
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core import exceptions as django_exceptions
+from datetime import date
 from django.utils.encoding import force_bytes, force_str
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from django.contrib.auth.tokens import default_token_generator
@@ -79,6 +80,11 @@ class ClientSerializer(serializers.ModelSerializer):
         cleaned = value.strip()
         if not cleaned:
             raise serializers.ValidationError("Client name cannot be empty.")
+        qs = Client.objects.filter(name__iexact=cleaned)
+        if self.instance is not None:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise serializers.ValidationError("Client with this name already exists.")
         return cleaned
 
     def get_owner_user_ids(self, obj):
@@ -131,6 +137,56 @@ class ClientMonthlyAmountSerializer(serializers.ModelSerializer):
         if value is None:
             raise serializers.ValidationError("Amount is required.")
         return value
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        client = attrs.get("client", getattr(self.instance, "client", None))
+        month_date = attrs.get("date", getattr(self.instance, "date", None))
+
+        if client is not None and month_date is not None:
+            qs = ClientMonthlyAmount.objects.filter(client=client, date=month_date)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {"date": "A revenue record already exists for this client and reporting month."}
+                )
+
+        return attrs
+
+
+class ClientMonthlyAmountRangeSerializer(serializers.Serializer):
+    client = serializers.PrimaryKeyRelatedField(queryset=Client.objects.all())
+    from_month = serializers.CharField()
+    to_month = serializers.CharField()
+    amt = serializers.DecimalField(max_digits=12, decimal_places=2)
+
+    def validate_amt(self, value):
+        if value is None:
+            raise serializers.ValidationError("Amount is required.")
+        if value < 0:
+            raise serializers.ValidationError("Amount must be zero or greater.")
+        return value
+
+    def validate(self, attrs):
+        from_month = self._parse_month(attrs["from_month"], "from_month")
+        to_month = self._parse_month(attrs["to_month"], "to_month")
+
+        if from_month > to_month:
+            raise serializers.ValidationError({"to_month": "To month must be the same as or after from month."})
+
+        attrs["from_month"] = from_month
+        attrs["to_month"] = to_month
+        return attrs
+
+    def _parse_month(self, value, field_name):
+        cleaned = str(value or "").strip()
+        try:
+            year_str, month_str = cleaned.split("-", 1)
+            parsed = date(int(year_str), int(month_str), 1)
+        except (TypeError, ValueError):
+            raise serializers.ValidationError({field_name: "Use YYYY-MM format."})
+        return parsed
 
 
 class ScopeOfWorkSerializer(serializers.ModelSerializer):

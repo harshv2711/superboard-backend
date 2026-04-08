@@ -26,10 +26,11 @@ class UserSerializer(serializers.ModelSerializer):
             "remove_employee_profile",
             "password",
             "is_staff",
+            "is_superuser",
             "is_active",
             "date_joined",
         ]
-        read_only_fields = ["id", "date_joined", "is_staff"]
+        read_only_fields = ["id", "date_joined"]
 
     def validate_email(self, value):
         email = value.strip().lower()
@@ -45,6 +46,18 @@ class UserSerializer(serializers.ModelSerializer):
         if value in {User.Role.SUPERUSER, User.Role.ADMIN}:
             if not request or not request.user or not request.user.is_staff:
                 raise serializers.ValidationError("Only staff users can assign admin or superuser role.")
+        return value
+
+    def validate_is_staff(self, value):
+        request = self.context.get("request")
+        if value and (not request or not request.user or not request.user.is_staff):
+            raise serializers.ValidationError("Only staff users can grant staff access.")
+        return value
+
+    def validate_is_superuser(self, value):
+        request = self.context.get("request")
+        if value and (not request or not request.user or not request.user.is_superuser):
+            raise serializers.ValidationError("Only superusers can grant superuser access.")
         return value
 
     def create(self, validated_data):
@@ -82,6 +95,18 @@ class UserSerializer(serializers.ModelSerializer):
         attrs = super().validate(attrs)
         employee_profile_data = attrs.get("employee_profile")
         remove_employee_profile = attrs.get("remove_employee_profile", False)
+        role = attrs.get("role", getattr(self.instance, "role", User.Role.DESIGNER))
+        is_superuser = attrs.get("is_superuser", getattr(self.instance, "is_superuser", False))
+
+        if is_superuser:
+            attrs["is_staff"] = True
+            if "role" not in attrs:
+                attrs["role"] = User.Role.SUPERUSER
+            elif role != User.Role.SUPERUSER:
+                raise serializers.ValidationError({"role": "Users with superuser status must use the superuser role."})
+
+        if attrs.get("role", role) == User.Role.SUPERUSER and not attrs.get("is_superuser", is_superuser):
+            raise serializers.ValidationError({"is_superuser": "Superuser role requires superuser status."})
 
         if employee_profile_data is None or remove_employee_profile:
             return attrs

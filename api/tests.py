@@ -1,6 +1,7 @@
 import shutil
 import tempfile
 from decimal import Decimal
+from datetime import date
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -9,7 +10,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Brand, Client, ClientOwner, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TypeOfWork
+from .models import Brand, Client, ClientMonthlyAmount, ClientOwner, NegativeRemark, NegativeRemarkOnTask, ScopeOfWork, ServiceCategory, Task, TypeOfWork
 from .utils.task_points import calculate_designer_points, calculate_task_points
 
 User = get_user_model()
@@ -477,6 +478,21 @@ class ClientAPITests(APITestCase):
         self.assertEqual(response.data["clientInterfaceContactNumber"], "+91-9988776655")
         self.assertEqual(response.data["accentColor"], "#FF6600")
         self.assertTrue(ClientOwner.objects.filter(user=self.planner, client_id=response.data["id"]).exists())
+
+    def test_prevent_duplicate_client_name_case_insensitive(self):
+        response = self.client.post(
+            self.list_url,
+            {
+                "name": "acme holdings",
+                "clientInterface": "another@acme.com",
+                "clientInterfaceContactNumber": "+91-9000000000",
+                "accentColor": "#112233",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("name", response.data)
 
     def test_create_client_with_logo(self):
         logo = SimpleUploadedFile(
@@ -2190,3 +2206,68 @@ class TaskPointsUtilsTests(TestCase):
         )
 
         self.assertEqual(calculate_designer_points(self.designer), 7.75)
+
+
+class ClientMonthlyAmountAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            email="superuser@test.com",
+            password="password123",
+            role=User.Role.SUPERUSER,
+            is_staff=True,
+            is_superuser=True,
+        )
+        self.client.force_authenticate(self.user)
+        self.client_obj = Client.objects.create(name="Pivot", client_interface="Harsh")
+        self.list_url = reverse("client-monthly-amount-list")
+        self.apply_range_url = reverse("client-monthly-amount-apply-range")
+
+    def test_apply_range_creates_monthly_rows(self):
+        response = self.client.post(
+            self.apply_range_url,
+            {
+                "client": self.client_obj.id,
+                "from_month": "2026-01",
+                "to_month": "2026-03",
+                "amt": "50000.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["created_count"], 3)
+        self.assertEqual(response.data["updated_count"], 0)
+        self.assertEqual(
+            list(
+                ClientMonthlyAmount.objects.filter(client=self.client_obj)
+                .order_by("date")
+                .values_list("date", flat=True)
+            ),
+            [date(2026, 1, 1), date(2026, 2, 1), date(2026, 3, 1)],
+        )
+
+    def test_apply_range_updates_existing_rows(self):
+        ClientMonthlyAmount.objects.create(client=self.client_obj, date="2026-02-01", amt=Decimal("1000.00"))
+
+        response = self.client.post(
+            self.apply_range_url,
+            {
+                "client": self.client_obj.id,
+                "from_month": "2026-01",
+                "to_month": "2026-03",
+                "amt": "25000.00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["created_count"], 2)
+        self.assertEqual(response.data["updated_count"], 1)
+        self.assertEqual(
+            list(
+                ClientMonthlyAmount.objects.filter(client=self.client_obj)
+                .order_by("date")
+                .values_list("amt", flat=True)
+            ),
+            [Decimal("25000.00"), Decimal("25000.00"), Decimal("25000.00")],
+        )

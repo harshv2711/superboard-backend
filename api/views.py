@@ -1,3 +1,4 @@
+from datetime import date
 from django.contrib.auth import logout
 from django.db import transaction
 from django.db.models.deletion import ProtectedError
@@ -31,6 +32,7 @@ from .serializers import (
     ClientSerializer,
     ClientAttachmentSerializer,
     ClientMonthlyAmountSerializer,
+    ClientMonthlyAmountRangeSerializer,
     ClientOwnerSerializer,
     DesignerKpiSummarySerializer,
     EmailAuthTokenSerializer,
@@ -231,6 +233,67 @@ class ClientMonthlyAmountViewSet(viewsets.ModelViewSet):
         if not user_can_manage_client(self.request.user, client):
             raise PermissionDenied("You do not have permission to modify this client's monthly amount.")
         serializer.save()
+
+    @action(detail=False, methods=["post"], url_path="apply-range")
+    def apply_range(self, request):
+        serializer = ClientMonthlyAmountRangeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        client = serializer.validated_data["client"]
+        if not user_can_manage_client(request.user, client):
+            raise PermissionDenied("You do not have permission to modify this client's monthly amount.")
+
+        from_month = serializer.validated_data["from_month"]
+        to_month = serializer.validated_data["to_month"]
+        amount = serializer.validated_data["amt"]
+
+        month_dates = []
+        current = from_month
+        while current <= to_month:
+            month_dates.append(current)
+            if current.month == 12:
+                current = date(current.year + 1, 1, 1)
+            else:
+                current = date(current.year, current.month + 1, 1)
+
+        created_count = 0
+        updated_count = 0
+        records = []
+
+        with transaction.atomic():
+            existing_rows = {
+                row.date: row
+                for row in ClientMonthlyAmount.objects.filter(client=client, date__in=month_dates)
+            }
+
+            for month_date in month_dates:
+                existing_row = existing_rows.get(month_date)
+                if existing_row is not None:
+                    existing_row.amt = amount
+                    existing_row.save(update_fields=["amt", "updated_at"])
+                    updated_count += 1
+                    records.append(existing_row)
+                else:
+                    created_row = ClientMonthlyAmount.objects.create(
+                        client=client,
+                        date=month_date,
+                        amt=amount,
+                    )
+                    created_count += 1
+                    records.append(created_row)
+
+        return Response(
+            {
+                "client": client.id,
+                "from_month": from_month.strftime("%Y-%m"),
+                "to_month": to_month.strftime("%Y-%m"),
+                "amt": amount,
+                "created_count": created_count,
+                "updated_count": updated_count,
+                "records": ClientMonthlyAmountSerializer(records, many=True).data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 
 class ClientOwnerViewSet(viewsets.ModelViewSet):

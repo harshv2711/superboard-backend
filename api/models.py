@@ -1,6 +1,7 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
+from django.db.models.functions import Lower
 import re
 
 
@@ -55,6 +56,9 @@ class Client(models.Model):
 
     class Meta:
         ordering = ["name"]
+        constraints = [
+            models.UniqueConstraint(Lower("name"), name="uniq_client_name_ci")
+        ]
         indexes = [
             models.Index(fields=["name"]),
         ]
@@ -103,6 +107,9 @@ class ClientMonthlyAmount(models.Model):
 
     class Meta:
         ordering = ["-date", "-id"]
+        constraints = [
+            models.UniqueConstraint(fields=["client", "date"], name="uniq_client_monthly_amount_client_date")
+        ]
         indexes = [
             models.Index(fields=["client"]),
             models.Index(fields=["date"]),
